@@ -53,29 +53,61 @@ void clearCard(lv_obj_t* obj) {
     lv_obj_clear_flag(obj, LV_OBJ_FLAG_SCROLLABLE);
 }
 
-// 通用修饰:size / padding / bg
-void applyCommon(lv_obj_t* obj, const Element& e) {
-    if (e.width > 0 || e.height > 0) {
-        lv_obj_set_size(obj,
-            e.width > 0 ? (lv_coord_t)e.width : LV_SIZE_CONTENT,
-            e.height > 0 ? (lv_coord_t)e.height : LV_SIZE_CONTENT);
+// 应用 Element 的方向性 padding。pad() 会同时设置 paddingPx 与四边;
+// 单独 padTop() 等会覆盖对应边,优先级高于统一的 paddingPx。
+void applyPadding(lv_obj_t* obj, const Element& e) {
+    if (e.paddingTop == e.paddingBottom && e.paddingTop == e.paddingLeft &&
+        e.paddingTop == e.paddingRight) {
+        lv_obj_set_style_pad_all(obj, (lv_coord_t)e.paddingTop, 0);
+    } else {
+        lv_obj_set_style_pad_top(obj, (lv_coord_t)e.paddingTop, 0);
+        lv_obj_set_style_pad_bottom(obj, (lv_coord_t)e.paddingBottom, 0);
+        lv_obj_set_style_pad_left(obj, (lv_coord_t)e.paddingLeft, 0);
+        lv_obj_set_style_pad_right(obj, (lv_coord_t)e.paddingRight, 0);
     }
-    if (e.paddingPx > 0) lv_obj_set_style_pad_all(obj, (lv_coord_t)e.paddingPx, 0);
-    if (e.hasBg) {
-        lv_obj_set_style_bg_color(obj, lv_color_hex(e.bgColor), 0);
-        lv_obj_set_style_bg_opa(obj, LV_OPA_COVER, 0);
+}
+
+// 纯文本 Button 在构造时只填了 text,没有 children。
+// diff 时需要把 text 合成一个 Text 子节点,否则旧 Text 会被当成"已被删除"。
+std::vector<Element> getChildElements(const Element& e) {
+    if (e.kind != Element::Button || !e.children.empty()) return e.children;
+    std::vector<Element> result;
+    if (!e.text.empty()) {
+        Element label;
+        label.kind = Element::Text;
+        label.text = e.text;
+        label.fontPx = e.fontPx;
+        label.ttfPath = e.ttfPath;
+        if (e.hasFg) {
+            label.hasFg = true;
+            label.fgColor = e.fgColor;
+        }
+        result.push_back(label);
     }
+    return result;
 }
 
 } // namespace
 
-LvglBackend::LvglBackend(lv_obj_t* parent) : parent_(parent) {}
+LvglBackend::LvglBackend(lv_obj_t* parent) : parent_(parent) {
+    root_.obj = nullptr;
+}
 
 LvglBackend::~LvglBackend() {
+    if (root_.obj) clearNode(root_);
     for (std::map<std::string, lv_font_t*>::iterator it = ftFonts_.begin();
          it != ftFonts_.end(); ++it) {
         lv_ft_font_destroy(it->second);
     }
+}
+
+void LvglBackend::clearNode(MountedNode& node) {
+    for (size_t i = 0; i < node.children.size(); ++i) {
+        clearNode(node.children[i]);
+    }
+    node.children.clear();
+    if (node.obj) lv_obj_del(node.obj);
+    node.callbacks.clear();  // lv_obj_del 已移除事件,这里释放 std::function
 }
 
 bool ensureFreetype() {
@@ -105,7 +137,6 @@ lv_font_t* LvglBackend::getFtFont(const std::string& path, int px) {
 
 void LvglBackend::applyTextStyle(lv_obj_t* label, const Element& e) {
     if (!e.ttfPath.empty()) {
-        // TTF 矢量字体:任意字号,中英文同字体
         lv_font_t* f = getFtFont(e.ttfPath, e.fontPx > 0 ? e.fontPx : 16);
         if (f != nullptr) lv_obj_set_style_text_font(label, f, 0);
     } else {
@@ -114,80 +145,373 @@ void LvglBackend::applyTextStyle(lv_obj_t* label, const Element& e) {
     if (e.hasFg) lv_obj_set_style_text_color(label, lv_color_hex(e.fgColor), 0);
 }
 
-void LvglBackend::mount(const Element& root) {
-    // 先删旧控件树(删除过程不会触发点击回调),再释放旧回调实体。
-    lv_obj_clean(parent_);
-    callbacks_.clear();
-    buildNode(root, parent_);
+void LvglBackend::updateContainerStyle(lv_obj_t* obj, const Element& oldE,
+                                       const Element& newE) {
+    const bool wasAnim = (oldE.animation == Element::SlideInRight);
+    const bool isAnim = (newE.animation == Element::SlideInRight);
+    bool styleChanged = false;
+
+    // 动画类型发生变化:整个节点已在 updateNode 中重建,这里不处理
+    // 对于已存在的动画节点,不更新其尺寸/浮动状态(创建时一次性确定)
+    if (!wasAnim && !isAnim) {
+        if (oldE.width != newE.width || oldE.height != newE.height) {
+            lv_obj_set_size(obj,
+                newE.width > 0 ? (lv_coord_t)newE.width : LV_SIZE_CONTENT,
+                newE.height > 0 ? (lv_coord_t)newE.height : LV_SIZE_CONTENT);
+            styleChanged = true;
+        }
+    }
+
+    if (oldE.paddingTop != newE.paddingTop ||
+        oldE.paddingBottom != newE.paddingBottom ||
+        oldE.paddingLeft != newE.paddingLeft ||
+        oldE.paddingRight != newE.paddingRight) {
+        applyPadding(obj, newE);
+        styleChanged = true;
+    }
+
+    if (oldE.hasBg != newE.hasBg || oldE.bgColor != newE.bgColor) {
+        if (newE.hasBg) {
+            lv_obj_set_style_bg_color(obj, lv_color_hex(newE.bgColor), 0);
+            lv_obj_set_style_bg_opa(obj, LV_OPA_COVER, 0);
+        } else {
+            lv_obj_set_style_bg_opa(obj, LV_OPA_TRANSP, 0);
+        }
+        styleChanged = true;
+    }
+
+    if (oldE.flexGrow != newE.flexGrow) {
+        lv_obj_set_flex_grow(obj, newE.flexGrow ? 1 : 0);
+        styleChanged = true;
+    }
+
+    if (oldE.center != newE.center) {
+        if (newE.center)
+            lv_obj_set_flex_align(obj, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER,
+                                  LV_FLEX_ALIGN_CENTER);
+        else
+            lv_obj_set_flex_align(obj, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START,
+                                  LV_FLEX_ALIGN_START);
+        styleChanged = true;
+    }
+
+    // 容器主轴/交叉轴间距
+    if (oldE.spacing != newE.spacing) {
+        if (newE.kind == Element::Column || newE.kind == Element::Button) {
+            lv_obj_set_style_pad_row(obj, (lv_coord_t)newE.spacing, 0);
+        } else {
+            lv_obj_set_style_pad_column(obj, (lv_coord_t)newE.spacing, 0);
+        }
+        styleChanged = true;
+    }
+
+    if (styleChanged) lv_obj_invalidate(obj);
 }
 
-lv_obj_t* LvglBackend::buildNode(const Element& e, lv_obj_t* parent) {
+lv_obj_t* LvglBackend::buildNode(const Element& e, lv_obj_t* parent,
+                                 MountedNode* out) {
+    lv_obj_t* obj = nullptr;
     switch (e.kind) {
     case Element::Column:
     case Element::Row: {
         const bool col = (e.kind == Element::Column);
-        lv_obj_t* box = lv_obj_create(parent);
-        lv_obj_set_size(box, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
-        clearCard(box);
-        lv_obj_set_flex_flow(box, col ? LV_FLEX_FLOW_COLUMN : LV_FLEX_FLOW_ROW);
-        applyCommon(box, e);
+        obj = lv_obj_create(parent);
+        clearCard(obj);
+        lv_obj_set_size(obj,
+            e.width > 0 ? (lv_coord_t)e.width : LV_SIZE_CONTENT,
+            e.height > 0 ? (lv_coord_t)e.height : LV_SIZE_CONTENT);
+        lv_obj_set_flex_flow(obj, col ? LV_FLEX_FLOW_COLUMN : LV_FLEX_FLOW_ROW);
+        if (e.flexGrow) lv_obj_set_flex_grow(obj, 1);
+        applyPadding(obj, e);
+        if (e.hasBg) {
+            lv_obj_set_style_bg_color(obj, lv_color_hex(e.bgColor), 0);
+            lv_obj_set_style_bg_opa(obj, LV_OPA_COVER, 0);
+        }
         if (e.spacing > 0) {
-            if (col) lv_obj_set_style_pad_row(box, (lv_coord_t)e.spacing, 0);
-            else     lv_obj_set_style_pad_column(box, (lv_coord_t)e.spacing, 0);
+            if (col) lv_obj_set_style_pad_row(obj, (lv_coord_t)e.spacing, 0);
+            else     lv_obj_set_style_pad_column(obj, (lv_coord_t)e.spacing, 0);
         }
         if (e.center) {
-            lv_obj_set_flex_align(box, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER,
+            lv_obj_set_flex_align(obj, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER,
                                   LV_FLEX_ALIGN_CENTER);
         }
-        for (size_t i = 0; i < e.children.size(); ++i) {
-            buildNode(e.children[i], box);
+        if (e.animation == Element::SlideInRight) {
+            lv_obj_add_flag(obj, LV_OBJ_FLAG_FLOATING);
         }
-        return box;
+        break;
     }
     case Element::Spacer: {
-        lv_obj_t* sp = lv_obj_create(parent);
-        clearCard(sp);
-        lv_obj_set_flex_grow(sp, 1);
-        return sp;
+        obj = lv_obj_create(parent);
+        clearCard(obj);
+        lv_obj_set_flex_grow(obj, 1);
+        break;
     }
     case Element::Text: {
-        lv_obj_t* label = lv_label_create(parent);
-        lv_label_set_text(label, e.text.c_str());
-        applyTextStyle(label, e);
-        applyCommon(label, e);
-        return label;
+        obj = lv_label_create(parent);
+        lv_label_set_text(obj, e.text.c_str());
+        applyTextStyle(obj, e);
+        if (e.width > 0 || e.height > 0) {
+            lv_obj_set_size(obj,
+                e.width > 0 ? (lv_coord_t)e.width : LV_SIZE_CONTENT,
+                e.height > 0 ? (lv_coord_t)e.height : LV_SIZE_CONTENT);
+        }
+        break;
     }
     case Element::Button: {
-        lv_obj_t* btn = lv_btn_create(parent);
-        lv_obj_clear_flag(btn, LV_OBJ_FLAG_SCROLLABLE);
-        applyCommon(btn, e);
-        if (e.children.empty()) {
-            lv_obj_t* label = lv_label_create(btn);
-            lv_label_set_text(label, e.text.c_str());
-            applyTextStyle(label, e);
-            lv_obj_center(label);
-        } else {
-            lv_obj_set_flex_flow(btn, LV_FLEX_FLOW_COLUMN);
-            lv_obj_set_flex_align(btn, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER,
+        obj = lv_btn_create(parent);
+        lv_obj_clear_flag(obj, LV_OBJ_FLAG_SCROLLABLE);
+        lv_obj_set_size(obj,
+            e.width > 0 ? (lv_coord_t)e.width : LV_SIZE_CONTENT,
+            e.height > 0 ? (lv_coord_t)e.height : LV_SIZE_CONTENT);
+        lv_obj_set_flex_flow(obj, LV_FLEX_FLOW_COLUMN);
+        if (e.flexGrow) lv_obj_set_flex_grow(obj, 1);
+        applyPadding(obj, e);
+        if (e.hasBg) {
+            lv_obj_set_style_bg_color(obj, lv_color_hex(e.bgColor), 0);
+        }
+        if (e.spacing > 0) {
+            lv_obj_set_style_pad_row(obj, (lv_coord_t)e.spacing, 0);
+        }
+        if (e.center) {
+            lv_obj_set_flex_align(obj, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER,
                                   LV_FLEX_ALIGN_CENTER);
-            lv_obj_set_style_pad_row(btn, 10, 0);
-            for (size_t i = 0; i < e.children.size(); ++i) {
-                buildNode(e.children[i], btn);
-            }
         }
         if (e.onTap) {
-            callbacks_.push_back(std::unique_ptr<std::function<void()> >(
+            MountedNode tmp;  // 临时占位,构建完再合并回调
+            tmp.callbacks.push_back(std::unique_ptr<std::function<void()> >(
                 new std::function<void()>(e.onTap)));
-            lv_obj_add_event_cb(btn, &LvglBackend::onClicked, LV_EVENT_CLICKED,
-                                callbacks_.back().get());
+            lv_obj_add_event_cb(obj, &LvglBackend::onClicked, LV_EVENT_CLICKED,
+                                tmp.callbacks.back().get());
+            if (out) out->callbacks.push_back(std::move(tmp.callbacks.back()));
         }
-        return btn;
+        break;
     }
+    case Element::Slider: {
+        obj = lv_slider_create(parent);
+        lv_slider_set_range(obj, e.min, e.max);
+        lv_slider_set_value(obj, e.value, LV_ANIM_OFF);
+        if (e.width > 0 || e.height > 0) {
+            lv_obj_set_size(obj,
+                e.width > 0 ? (lv_coord_t)e.width : LV_SIZE_CONTENT,
+                e.height > 0 ? (lv_coord_t)e.height : LV_SIZE_CONTENT);
+        }
+        if (e.onValueChange) {
+            MountedNode tmp;
+            std::function<void(int)> cb = e.onValueChange;
+            tmp.callbacks.push_back(std::unique_ptr<std::function<void()> >(
+                new std::function<void()>([obj, cb] {
+                    cb(lv_slider_get_value(obj));
+                })));
+            lv_obj_add_event_cb(obj, &LvglBackend::onSliderChanged,
+                                LV_EVENT_VALUE_CHANGED, tmp.callbacks.back().get());
+            if (out) out->callbacks.push_back(std::move(tmp.callbacks.back()));
+        }
+        break;
+    }
+    }
+
+    if (out) {
+        out->element = e;
+        out->obj = obj;
+        out->children.clear();
+    }
+
+    // 容器/按钮:递归构建子节点
+    if (e.kind == Element::Column || e.kind == Element::Row ||
+        e.kind == Element::Button) {
+        const std::vector<Element> childElements = getChildElements(e);
+        for (size_t i = 0; i < childElements.size(); ++i) {
+            if (out) {
+                out->children.push_back(MountedNode());
+                buildNode(childElements[i], obj, &out->children.back());
+            } else {
+                buildNode(childElements[i], obj, nullptr);
+            }
+        }
+    }
+
+    if (e.animation == Element::SlideInRight && obj) {
+        newAnims_.push_back(NewAnim{obj, parent});
+    }
+
+    return obj;
+}
+
+void LvglBackend::updateNode(MountedNode& old, const Element& newE) {
+    if (old.element.kind != newE.kind ||
+        (old.element.animation == Element::SlideInRight) !=
+            (newE.animation == Element::SlideInRight) ||
+        (!old.element.onTap && newE.onTap) || (old.element.onTap && !newE.onTap) ||
+        (!old.element.onValueChange && newE.onValueChange) ||
+        (old.element.onValueChange && !newE.onValueChange)) {
+        // 类型/动画/回调有无发生变化:整子树重建
+        lv_obj_t* parent = lv_obj_get_parent(old.obj);  // 先保存父节点
+        clearNode(old);
+        old.element = newE;
+        old.obj = buildNode(newE, parent, &old);
+        return;
+    }
+
+    lv_obj_t* obj = old.obj;
+
+    switch (newE.kind) {
+    case Element::Column:
+    case Element::Row: {
+        updateContainerStyle(obj, old.element, newE);
+        diffChildren(old, newE.children);
+        break;
+    }
+    case Element::Spacer:
+        // spacer 无属性可更新
+        break;
+    case Element::Text: {
+        if (old.element.text != newE.text) {
+            lv_label_set_text(obj, newE.text.c_str());
+        }
+        if (old.element.text != newE.text ||
+            old.element.fontPx != newE.fontPx ||
+            old.element.ttfPath != newE.ttfPath ||
+            old.element.hasFg != newE.hasFg ||
+            old.element.fgColor != newE.fgColor) {
+            applyTextStyle(obj, newE);
+        }
+        if (old.element.width != newE.width || old.element.height != newE.height) {
+            lv_obj_set_size(obj,
+                newE.width > 0 ? (lv_coord_t)newE.width : LV_SIZE_CONTENT,
+                newE.height > 0 ? (lv_coord_t)newE.height : LV_SIZE_CONTENT);
+        }
+        break;
+    }
+    case Element::Button: {
+        updateContainerStyle(obj, old.element, newE);
+        diffChildren(old, getChildElements(newE));
+        break;
+    }
+    case Element::Slider: {
+        if (old.element.min != newE.min || old.element.max != newE.max) {
+            lv_slider_set_range(obj, newE.min, newE.max);
+        }
+        if (old.element.value != newE.value) {
+            lv_slider_set_value(obj, newE.value, LV_ANIM_OFF);
+        }
+        if (old.element.width != newE.width || old.element.height != newE.height) {
+            lv_obj_set_size(obj,
+                newE.width > 0 ? (lv_coord_t)newE.width : LV_SIZE_CONTENT,
+                newE.height > 0 ? (lv_coord_t)newE.height : LV_SIZE_CONTENT);
+        }
+        break;
+    }
+    }
+
+    old.element = newE;
+}
+
+LvglBackend::MountedNode* LvglBackend::findMatch(
+    std::vector<MountedNode>& oldChildren, const Element& newChild,
+    size_t preferredIdx, std::vector<bool>& used) {
+    // 1. key 匹配:有 key 的节点只按 key 复用
+    if (!newChild.keyId.empty()) {
+        for (size_t j = 0; j < oldChildren.size(); ++j) {
+            if (!used[j] && oldChildren[j].element.keyId == newChild.keyId) {
+                return &oldChildren[j];
+            }
+        }
+        return nullptr;
+    }
+
+    // 2. 同位置同类型匹配(仅对无 key 节点)
+    if (preferredIdx < oldChildren.size() && !used[preferredIdx] &&
+        oldChildren[preferredIdx].element.kind == newChild.kind &&
+        oldChildren[preferredIdx].element.keyId.empty()) {
+        return &oldChildren[preferredIdx];
+    }
+
+    // 3. 任意同类型匹配(仅对无 key 节点)
+    for (size_t j = 0; j < oldChildren.size(); ++j) {
+        if (!used[j] && oldChildren[j].element.keyId.empty() &&
+            oldChildren[j].element.kind == newChild.kind) {
+            return &oldChildren[j];
+        }
     }
     return nullptr;
 }
 
+void LvglBackend::diffChildren(MountedNode& parentNode,
+                               const std::vector<Element>& newChildren) {
+    std::vector<MountedNode>& oldChildren = parentNode.children;
+    std::vector<MountedNode> nextChildren;
+    nextChildren.reserve(newChildren.size());
+
+    std::vector<bool> used(oldChildren.size(), false);
+
+    for (size_t i = 0; i < newChildren.size(); ++i) {
+        MountedNode* match = findMatch(oldChildren, newChildren[i], i, used);
+        if (match) {
+            size_t idx = static_cast<size_t>(match - oldChildren.data());
+            used[idx] = true;
+            MountedNode node = std::move(*match);
+            lv_obj_move_to_index(node.obj, (int32_t)i);
+            updateNode(node, newChildren[i]);
+            nextChildren.push_back(std::move(node));
+        } else {
+            MountedNode newNode;
+            newNode.element = newChildren[i];
+            newNode.obj = buildNode(newChildren[i], parentNode.obj, &newNode);
+            lv_obj_move_to_index(newNode.obj, (int32_t)i);
+            nextChildren.push_back(std::move(newNode));
+        }
+    }
+
+    for (size_t j = 0; j < oldChildren.size(); ++j) {
+        if (!used[j]) clearNode(oldChildren[j]);
+    }
+
+    parentNode.children = std::move(nextChildren);
+}
+
+void LvglBackend::mount(const Element& root) {
+    if (root_.obj == nullptr) {
+        root_.element = root;
+        root_.obj = buildNode(root, parent_, &root_);
+    } else {
+        updateNode(root_, root);
+    }
+
+    lv_obj_update_layout(parent_);
+    playNewAnimations();
+}
+
+void LvglBackend::playNewAnimations() {
+    for (size_t i = 0; i < newAnims_.size(); ++i) {
+        const NewAnim& a = newAnims_[i];
+        const lv_coord_t w = lv_obj_get_content_width(a.parent);
+        const lv_coord_t h = lv_obj_get_content_height(a.parent);
+        if (w <= 0 || h <= 0) continue;
+        lv_obj_set_size(a.obj, w, h);
+        lv_obj_set_x(a.obj, w);
+        lv_anim_t anim;
+        lv_anim_init(&anim);
+        lv_anim_set_var(&anim, a.obj);
+        lv_anim_set_values(&anim, w, 0);
+        lv_anim_set_exec_cb(&anim, animSetX);
+        lv_anim_set_time(&anim, 300);
+        lv_anim_set_path_cb(&anim, lv_anim_path_ease_out);
+        lv_anim_start(&anim);
+    }
+    newAnims_.clear();
+}
+
+void LvglBackend::animSetX(void* obj, int32_t v) {
+    lv_obj_set_x((lv_obj_t*)obj, (lv_coord_t)v);
+}
+
 void LvglBackend::onClicked(lv_event_t* e) {
+    std::function<void()>* cb =
+        static_cast<std::function<void()>*>(lv_event_get_user_data(e));
+    if (cb && *cb) (*cb)();
+}
+
+void LvglBackend::onSliderChanged(lv_event_t* e) {
     std::function<void()>* cb =
         static_cast<std::function<void()>*>(lv_event_get_user_data(e));
     if (cb && *cb) (*cb)();
@@ -202,7 +526,6 @@ void flushDiscard(lv_disp_drv_t* drv, const lv_area_t*, lv_color_t*) {
 } // namespace
 
 lv_disp_t* createHeadlessDisplay(int horRes, int verRes) {
-    // 这些对象随进程生命周期存在(仅供测试/宿主预览,不做回收)。
     lv_color_t* pixels = new lv_color_t[(size_t)(horRes * verRes)];
     lv_disp_draw_buf_t* drawBuf = new lv_disp_draw_buf_t;
     lv_disp_draw_buf_init(drawBuf, pixels, nullptr, (uint32_t)(horRes * verRes));

@@ -54,7 +54,7 @@ Element bigTile(const char* icon, const char* label, int w, int h,
             skiff::Text(icon).font(32).fg(kHi),
             skiff::Text(label).ttf(kFont, 28).fg(kHi),
         }, [&page, name] { page.set(name); })
-        .size(w, h).bg(color);
+        .size(w, h).bg(color).centered();
 }
 
 Element smallTile(const char* icon, const char* label, int w, int h,
@@ -64,18 +64,18 @@ Element smallTile(const char* icon, const char* label, int w, int h,
             skiff::Text(icon).font(24).fg(kHi),
             skiff::Text(label).ttf(kFont, 18).fg(kHi),
         }, [&page, name] { page.set(name); })
-        .size(w, h).bg(kTile);
+        .size(w, h).bg(kTile).centered();
 }
 
 Element statusBar() {
     return skiff::HStack({
-        skiff::Text(clockText()).font(24).fg(kHi),
+        skiff::Text(clockText()).font(18).fg(kHi),
         skiff::Spacer(),
-        skiff::Text(ICON_GPS).font(20).fg(kLo),
-        skiff::Text(ICON_BT).font(20).fg(kLo),
-        skiff::Text(ICON_WIFI).font(20).fg(kLo),
-        skiff::Text(ICON_BATT).font(20).fg(kLo),
-    }, 14).size(776, 32).centered();
+        skiff::Text(ICON_GPS).font(16).fg(kLo),
+        skiff::Text(ICON_BT).font(16).fg(kLo),
+        skiff::Text(ICON_WIFI).font(16).fg(kLo),
+        skiff::Text(ICON_BATT).font(16).fg(kLo),
+    }, 12).size(776, 24).centered();
 }
 
 Element homePage(State<std::string>& page) {
@@ -100,7 +100,7 @@ Element homePage(State<std::string>& page) {
         mainRow,
         skiff::Spacer(),
         bottomRow,
-    }, 0).size(800, 480).bg(kBg).pad(12);
+    }, 0).size(800, 480).bg(kBg).pad(12).padTop(0);
 }
 
 Element subPage(State<std::string>& page) {
@@ -112,6 +112,109 @@ Element subPage(State<std::string>& page) {
     }, 18).size(800, 480).bg(kBg).centered();
 }
 
+// ---- 设置页:左侧一级菜单 + 右侧二级菜单(带右滑入动画) ----
+const int kMenuW = 200;
+
+Element settingsRow(const char* label, const char* value) {
+    return skiff::HStack({
+        skiff::Text(label).ttf(kFont, 18).fg(kHi),
+        skiff::Spacer(),
+        skiff::Text(value).ttf(kFont, 16).fg(kLo),
+    }, 0).size(560, 48).centered();
+}
+
+Element brightnessRow(State<int>& brightness) {
+    return skiff::HStack({
+        skiff::Text("亮度").ttf(kFont, 18).fg(kHi),
+        skiff::Spacer(),
+        skiff::Slider(brightness.get(), 0, 100,
+                      [&brightness](int v) { brightness.set(v); })
+            .size(180, 24),
+        skiff::Text(std::to_string(brightness.get()) + "%")
+            .ttf(kFont, 16).fg(kLo).size(48, 24),
+    }, 12).size(560, 48).centered();
+}
+
+Element networkSubmenu() {
+    return skiff::VStack({
+        settingsRow("Wi-Fi", "已连接"),
+        settingsRow("蓝牙", "开启"),
+        settingsRow("移动数据", "关闭"),
+        settingsRow("飞行模式", "关闭"),
+        settingsRow("热点", "未开启"),
+    }, 0).size(560, 440).pad(20);
+}
+
+Element displaySubmenu(State<int>& brightness) {
+    return skiff::VStack({
+        brightnessRow(brightness),
+        settingsRow("自动调节", "开启"),
+        settingsRow("夜间模式", "关闭"),
+        settingsRow("分辨率", "800x480"),
+        settingsRow("主题", "深色"),
+    }, 0).size(560, 440).pad(20);
+}
+
+Element soundSubmenu() {
+    return skiff::VStack({
+        settingsRow("媒体音量", "60%"),
+        settingsRow("导航音量", "80%"),
+        settingsRow("提示音", "开启"),
+        settingsRow("均衡器", "流行"),
+    }, 0).size(560, 440).pad(20);
+}
+
+Element systemSubmenu() {
+    return skiff::VStack({
+        settingsRow("系统版本", "v1.2.0"),
+        settingsRow("存储空间", "12GB/32GB"),
+        settingsRow("语言", "简体中文"),
+        settingsRow("恢复出厂", "-"),
+        settingsRow("关于", "-"),
+    }, 0).size(560, 440).pad(20);
+}
+
+Element rightSubmenu(int idx, State<int>& brightness) {
+    switch (idx) {
+    case 0: return networkSubmenu().key("network");
+    case 1: return displaySubmenu(brightness).key("display");
+    case 2: return soundSubmenu().key("sound");
+    default: return systemSubmenu().key("system");
+    }
+}
+
+Element settingsMenuItem(const char* label, int idx, int active,
+                         State<int>& tab) {
+    const bool on = (idx == active);
+    return skiff::Button(label, [&tab, idx] { tab.set(idx); })
+        .size(180, 48)
+        .bg(on ? kNavi : kTile)
+        .ttf(kFont, 18)
+        .fg(kHi);
+}
+
+Element leftMenu(int active, State<int>& tab, State<std::string>& page) {
+    return skiff::VStack({
+        settingsMenuItem("网络", 0, active, tab),
+        settingsMenuItem("显示", 1, active, tab),
+        settingsMenuItem("声音", 2, active, tab),
+        settingsMenuItem("系统", 3, active, tab),
+        skiff::Spacer(),
+        skiff::Button("返回主页", [&page] { page.set("home"); })
+            .size(180, 48).bg(0x3A4A5C).ttf(kFont, 18).fg(kHi),
+    }, 8).size(kMenuW, 480).bg(kBg).pad(10);
+}
+
+Element settingsPage(State<std::string>& page, State<int>& tab,
+                     State<int>& brightness) {
+    return skiff::HStack({
+        leftMenu(tab.get(), tab, page),
+        skiff::VStack({
+            rightSubmenu(tab.get(), brightness).slideInRight(),
+        }, 0).size(0, 480).expand().bg(kTile),
+    }, 0).size(800, 480).bg(kBg);
+}
+
 } // namespace
 
 int main() {
@@ -119,12 +222,18 @@ int main() {
     skiff::lvgl::createSdl3Display(800, 480, "skiff - PND home");
 
     State<std::string> page("home");
+    State<int> settingsTab(0);
+    State<int> brightness(80);
 
     skiff::lvgl::LvglBackend backend(lv_scr_act());
-    skiff::App app(backend, [&page]() -> Element {
-        return page.get() == "home" ? homePage(page) : subPage(page);
+    skiff::App app(backend, [&page, &settingsTab, &brightness]() -> Element {
+        if (page.get() == "home") return homePage(page);
+        if (page.get() == "设置") return settingsPage(page, settingsTab, brightness);
+        return subPage(page);
     });
     app.bind(page);
+    app.bind(settingsTab);
+    app.bind(brightness);
     app.start();
 
     while (skiff::lvgl::sdl3Pump()) {
