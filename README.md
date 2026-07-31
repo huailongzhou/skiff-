@@ -11,6 +11,7 @@
 
 ```
 include/skiff/          核心:Element / State / App / Backend 接口
+include/skiff/components/ 组合组件(纯 DSL):Sidebar(侧栏菜单 + 内容区)
 backends/lvgl/          LVGL 后端 + SDL3 宿主 + headless 显示器
 examples/               示例
   counter           无头冒烟测试

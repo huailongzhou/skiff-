@@ -112,9 +112,7 @@ Element subPage(State<std::string>& page) {
     }, 18).size(800, 480).bg(kBg).centered();
 }
 
-// ---- 设置页:左侧一级菜单 + 右侧二级菜单(带右滑入动画) ----
-const int kMenuW = 200;
-
+// ---- 设置页:Sidebar 组件(左侧一级菜单 + 右侧内容区) ----
 Element settingsRow(const char* label, const char* value) {
     return skiff::HStack({
         skiff::Text(label).ttf(kFont, 18).fg(kHi),
@@ -174,45 +172,25 @@ Element systemSubmenu() {
     }, 0).size(560, 440).pad(20);
 }
 
-Element rightSubmenu(int idx, State<int>& brightness) {
-    switch (idx) {
-    case 0: return networkSubmenu().key("network");
-    case 1: return displaySubmenu(brightness).key("display");
-    case 2: return soundSubmenu().key("sound");
-    default: return systemSubmenu().key("system");
-    }
-}
-
-Element settingsMenuItem(const char* label, int idx, int active,
-                         State<int>& tab) {
-    const bool on = (idx == active);
-    return skiff::Button(label, [&tab, idx] { tab.set(idx); })
-        .size(180, 48)
-        .bg(on ? kNavi : kTile)
-        .ttf(kFont, 18)
-        .fg(kHi);
-}
-
-Element leftMenu(int active, State<int>& tab, State<std::string>& page) {
-    return skiff::VStack({
-        settingsMenuItem("网络", 0, active, tab),
-        settingsMenuItem("显示", 1, active, tab),
-        settingsMenuItem("声音", 2, active, tab),
-        settingsMenuItem("系统", 3, active, tab),
-        skiff::Spacer(),
-        skiff::Button("返回主页", [&page] { page.set("home"); })
-            .size(180, 48).bg(0x3A4A5C).ttf(kFont, 18).fg(kHi),
-    }, 8).size(kMenuW, 480).bg(kBg).pad(10);
-}
-
 Element settingsPage(State<std::string>& page, State<int>& tab,
                      State<int>& brightness) {
-    return skiff::HStack({
-        leftMenu(tab.get(), tab, page),
-        skiff::VStack({
-            rightSubmenu(tab.get(), brightness).slideInRight(),
-        }, 0).size(0, 480).expand().bg(kTile),
-    }, 0).size(800, 480).bg(kBg);
+    skiff::components::SidebarOptions opt;
+    opt.width = 800;
+    opt.height = 480;
+    opt.ttfPath = kFont;
+    opt.activeBg = kNavi;
+    opt.inactiveBg = kTile;
+    opt.contentBg = kTile;
+    opt.hasContentBg = true;
+    opt.menuFooter = skiff::Button("返回主页", [&page] { page.set("home"); })
+        .size(180, 48).bg(0x3A4A5C).ttf(kFont, 18).fg(kHi);
+    opt.hasMenuFooter = true;
+    return skiff::components::Sidebar({
+            {"网络", networkSubmenu()},
+            {"显示", displaySubmenu(brightness)},
+            {"声音", soundSubmenu()},
+            {"系统", systemSubmenu()},
+        }, tab.get(), tab, opt).bg(kBg);
 }
 
 } // namespace

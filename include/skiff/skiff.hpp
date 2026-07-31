@@ -5,3 +5,4 @@
 #include "element.hpp"
 #include "state.hpp"
 #include "backend.hpp"
+#include "components/sidebar.hpp"
