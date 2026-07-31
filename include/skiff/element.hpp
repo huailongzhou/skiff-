@@ -19,7 +19,9 @@ struct Element {
         Text,    // 文本
         Button,  // 按钮(text 为文字;children 非空时用 children 做按钮内容)
         Spacer,  // 弹性空白(对应 SwiftUI 的 Spacer)
-        Slider   // 滑条
+        Slider,  // 滑条
+        TabView  // 页签容器(对应 SwiftUI 的 TabView;children 为各页内容,
+                 // 每个 child 的 text 作为该页标题,见 Tab())
     };
 
     enum Animation {
@@ -131,6 +133,21 @@ inline Element HStack(std::vector<Element> children, int spacing = 0) {
     e.kind = Element::Row;
     e.spacing = spacing;
     e.children = std::move(children);
+    return e;
+}
+
+// 一个页签:title 为标题,content 为该页内容(复用 content 的 text 字段存标题)
+inline Element Tab(std::string title, Element content) {
+    content.text = std::move(title);
+    return content;
+}
+
+// 页签容器:TabView({ Tab("标题1", 内容1), Tab("标题2", 内容2) })
+// font()/ttf()/fg() 作用于页签栏文字
+inline Element TabView(std::vector<Element> tabs) {
+    Element e;
+    e.kind = Element::TabView;
+    e.children = std::move(tabs);
     return e;
 }
 

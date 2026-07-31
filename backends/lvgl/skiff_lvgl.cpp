@@ -145,6 +145,27 @@ void LvglBackend::applyTextStyle(lv_obj_t* label, const Element& e) {
     if (e.hasFg) lv_obj_set_style_text_color(label, lv_color_hex(e.fgColor), 0);
 }
 
+// 页签栏(btnmatrix)样式:ttf()/font()/fg() 作用于页签文字,bg() 作用于页签栏底色
+void LvglBackend::applyTabBarStyle(lv_obj_t* tabview, const Element& e) {
+    lv_obj_t* btns = lv_tabview_get_tab_btns(tabview);
+    lv_font_t* f = nullptr;
+    if (!e.ttfPath.empty()) {
+        f = getFtFont(e.ttfPath, e.fontPx > 0 ? e.fontPx : 16);
+    } else if (e.fontPx > 0) {
+        bool cjk = false;
+        for (size_t i = 0; i < e.children.size(); ++i) {
+            if (containsCjk(e.children[i].text)) { cjk = true; break; }
+        }
+        f = const_cast<lv_font_t*>(pickFont(e.fontPx, cjk));
+    }
+    if (f != nullptr) lv_obj_set_style_text_font(btns, f, 0);
+    if (e.hasFg) lv_obj_set_style_text_color(btns, lv_color_hex(e.fgColor), 0);
+    if (e.hasBg) {
+        lv_obj_set_style_bg_color(btns, lv_color_hex(e.bgColor), 0);
+        lv_obj_set_style_bg_opa(btns, LV_OPA_COVER, 0);
+    }
+}
+
 void LvglBackend::updateContainerStyle(lv_obj_t* obj, const Element& oldE,
                                        const Element& newE) {
     const bool wasAnim = (oldE.animation == Element::SlideInRight);
@@ -211,6 +232,7 @@ void LvglBackend::updateContainerStyle(lv_obj_t* obj, const Element& oldE,
 lv_obj_t* LvglBackend::buildNode(const Element& e, lv_obj_t* parent,
                                  MountedNode* out) {
     lv_obj_t* obj = nullptr;
+    std::vector<lv_obj_t*> tabPages;  // TabView:各页签的 page 容器
     switch (e.kind) {
     case Element::Column:
     case Element::Row: {
@@ -308,6 +330,24 @@ lv_obj_t* LvglBackend::buildNode(const Element& e, lv_obj_t* parent,
         }
         break;
     }
+    case Element::TabView: {
+        obj = lv_tabview_create(parent, LV_DIR_TOP, 48);
+        clearCard(obj);  // 根对象去掉默认主题白底卡片样式
+        lv_obj_set_size(obj,
+            e.width > 0 ? (lv_coord_t)e.width : LV_SIZE_CONTENT,
+            e.height > 0 ? (lv_coord_t)e.height : LV_SIZE_CONTENT);
+        if (e.flexGrow) lv_obj_set_flex_grow(obj, 1);
+        applyTabBarStyle(obj, e);
+        clearCard(lv_tabview_get_content(obj));  // 内容容器去掉默认主题白底
+        // 每个 child 是一个页签:text 为标题,内容构建在该页签的 page 里
+        // (记录在 tabPages 中,待 out 初始化后再递归构建)
+        for (size_t i = 0; i < e.children.size(); ++i) {
+            lv_obj_t* page = lv_tabview_add_tab(obj, e.children[i].text.c_str());
+            clearCard(page);  // 去掉默认主题的白底卡片样式,让页面底色透出来
+            tabPages.push_back(page);
+        }
+        break;
+    }
     }
 
     if (out) {
@@ -328,6 +368,15 @@ lv_obj_t* LvglBackend::buildNode(const Element& e, lv_obj_t* parent,
                 buildNode(childElements[i], obj, nullptr);
             }
         }
+    } else if (e.kind == Element::TabView) {
+        for (size_t i = 0; i < e.children.size(); ++i) {
+            if (out) {
+                out->children.push_back(MountedNode());
+                buildNode(e.children[i], tabPages[i], &out->children.back());
+            } else {
+                buildNode(e.children[i], tabPages[i], nullptr);
+            }
+        }
     }
 
     if (e.animation == Element::SlideInRight && obj) {
@@ -338,7 +387,23 @@ lv_obj_t* LvglBackend::buildNode(const Element& e, lv_obj_t* parent,
 }
 
 void LvglBackend::updateNode(MountedNode& old, const Element& newE) {
-    if (old.element.kind != newE.kind ||
+    // TabView 页签结构(数量/标题)变化时无法就地更新,需整子树重建
+    bool tabStructureChanged = false;
+    if (old.element.kind == Element::TabView &&
+        newE.kind == Element::TabView) {
+        if (old.element.children.size() != newE.children.size()) {
+            tabStructureChanged = true;
+        } else {
+            for (size_t i = 0; i < newE.children.size(); ++i) {
+                if (old.element.children[i].text != newE.children[i].text) {
+                    tabStructureChanged = true;
+                    break;
+                }
+            }
+        }
+    }
+
+    if (old.element.kind != newE.kind || tabStructureChanged ||
         (old.element.animation == Element::SlideInRight) !=
             (newE.animation == Element::SlideInRight) ||
         (!old.element.onTap && newE.onTap) || (old.element.onTap && !newE.onTap) ||
@@ -398,6 +463,24 @@ void LvglBackend::updateNode(MountedNode& old, const Element& newE) {
             lv_obj_set_size(obj,
                 newE.width > 0 ? (lv_coord_t)newE.width : LV_SIZE_CONTENT,
                 newE.height > 0 ? (lv_coord_t)newE.height : LV_SIZE_CONTENT);
+        }
+        break;
+    }
+    case Element::TabView: {
+        // 结构不变:更新尺寸、页签栏样式,各页内容就地 diff
+        if (old.element.width != newE.width || old.element.height != newE.height) {
+            lv_obj_set_size(obj,
+                newE.width > 0 ? (lv_coord_t)newE.width : LV_SIZE_CONTENT,
+                newE.height > 0 ? (lv_coord_t)newE.height : LV_SIZE_CONTENT);
+        }
+        if (old.element.fontPx != newE.fontPx ||
+            old.element.ttfPath != newE.ttfPath ||
+            old.element.hasFg != newE.hasFg || old.element.fgColor != newE.fgColor ||
+            old.element.hasBg != newE.hasBg || old.element.bgColor != newE.bgColor) {
+            applyTabBarStyle(obj, newE);
+        }
+        for (size_t i = 0; i < newE.children.size(); ++i) {
+            updateNode(old.children[i], newE.children[i]);
         }
         break;
     }

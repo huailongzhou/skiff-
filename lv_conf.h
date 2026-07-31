@@ -28,6 +28,6 @@
 #define LV_FREETYPE_CACHE_SIZE (64 * 1024)
 
 /* 内置内存池大小(字节),示例/冒烟测试够用 */
-#define LV_MEM_SIZE (32U * 1024U)
+#define LV_MEM_SIZE (128U * 1024U)
 
 #endif /* LV_CONF_H */

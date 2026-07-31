@@ -3,6 +3,7 @@
 轻舟(Skiff)是一个 **C++11 声明式嵌入式 UI 框架**：像 SwiftUI 一样用函数描述界面，状态驱动更新，后端可插拔。
 
 - 核心后端无关(纯头文件 `include/skiff/`)，换后端不改页面代码
+- 元素:VStack / HStack / Text / Button / Spacer / Slider / TabView(页签容器)
 - 当前后端：**LVGL 8**(嵌入式渲染) + **SDL3**(PC 预览宿主，仅出窗口/输入)
 - 支持 **FreeType 矢量字体**(TTF，任意字号中文)
 

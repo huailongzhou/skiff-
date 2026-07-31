@@ -48,6 +48,7 @@ private:
                                   const Element& newChild, size_t preferredIdx,
                                   std::vector<bool>& used);
     void applyTextStyle(lv_obj_t* label, const Element& e);
+    void applyTabBarStyle(lv_obj_t* tabview, const Element& e);
     lv_font_t* getFtFont(const std::string& path, int px);
 
     static void onClicked(lv_event_t* e);
