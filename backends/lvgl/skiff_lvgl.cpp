@@ -448,11 +448,24 @@ void LvglBackend::updateNode(MountedNode& old, const Element& newE) {
         break;
     }
     case Element::Button: {
+        // 复用旧节点时,lv_btn 上挂的还是旧的 onTap(user_data 指向
+        // callbacks[0] 里的 std::function,地址稳定,直接改写内容即可)
+        if (old.element.onTap && newE.onTap && !old.callbacks.empty()) {
+            *old.callbacks[0] = newE.onTap;
+        }
         updateContainerStyle(obj, old.element, newE);
         diffChildren(old, getChildElements(newE));
         break;
     }
     case Element::Slider: {
+        // 同 Button:复用节点时更新值变化回调
+        if (old.element.onValueChange && newE.onValueChange &&
+            !old.callbacks.empty()) {
+            std::function<void(int)> cb = newE.onValueChange;
+            *old.callbacks[0] = [obj, cb] {
+                cb(lv_slider_get_value(obj));
+            };
+        }
         if (old.element.min != newE.min || old.element.max != newE.max) {
             lv_slider_set_range(obj, newE.min, newE.max);
         }

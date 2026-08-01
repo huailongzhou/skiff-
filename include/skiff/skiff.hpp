@@ -5,4 +5,6 @@
 #include "element.hpp"
 #include "state.hpp"
 #include "backend.hpp"
-#include "components/sidebar.hpp"
+#include "components/tabview.hpp"
+#include "components/top_nav.hpp"
+#include "components/page_view.hpp"

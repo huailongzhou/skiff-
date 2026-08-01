@@ -78,7 +78,9 @@ Element statusBar() {
     }, 12).size(776, 24).centered();
 }
 
-Element homePage(State<std::string>& page) {
+// ---- 主页:磁贴入口 ----
+Element homeBody(skiff::components::StateView& st) {
+    State<std::string>& page = st.get<std::string>("page");
     Element mainRow = skiff::HStack({
         bigTile(ICON_GPS, "导航", 510, 300, kNavi, page),
         skiff::VStack({
@@ -112,7 +114,7 @@ Element subPage(State<std::string>& page) {
     }, 18).size(800, 480).bg(kBg).centered();
 }
 
-// ---- 设置页:Sidebar 组件(左侧一级菜单 + 右侧内容区) ----
+// ---- 设置页:各子菜单内容(供 SettingsPage 使用) ----
 Element settingsRow(const char* label, const char* value) {
     return skiff::HStack({
         skiff::Text(label).ttf(kFont, 18).fg(kHi),
@@ -140,7 +142,7 @@ Element networkSubmenu() {
         settingsRow("移动数据", "关闭"),
         settingsRow("飞行模式", "关闭"),
         settingsRow("热点", "未开启"),
-    }, 0).size(560, 440).pad(20);
+    }, 0).size(560, 432).pad(20);
 }
 
 Element displaySubmenu(State<int>& brightness) {
@@ -150,7 +152,7 @@ Element displaySubmenu(State<int>& brightness) {
         settingsRow("夜间模式", "关闭"),
         settingsRow("分辨率", "800x480"),
         settingsRow("主题", "深色"),
-    }, 0).size(560, 440).pad(20);
+    }, 0).size(560, 432).pad(20);
 }
 
 Element soundSubmenu() {
@@ -159,7 +161,7 @@ Element soundSubmenu() {
         settingsRow("导航音量", "80%"),
         settingsRow("提示音", "开启"),
         settingsRow("均衡器", "流行"),
-    }, 0).size(560, 440).pad(20);
+    }, 0).size(560, 432).pad(20);
 }
 
 Element systemSubmenu() {
@@ -169,28 +171,42 @@ Element systemSubmenu() {
         settingsRow("语言", "简体中文"),
         settingsRow("恢复出厂", "-"),
         settingsRow("关于", "-"),
-    }, 0).size(560, 440).pad(20);
+    }, 0).size(560, 432).pad(20);
 }
 
-Element settingsPage(State<std::string>& page, State<int>& tab,
-                     State<int>& brightness) {
-    skiff::components::SidebarOptions opt;
+// ---- 设置页:TopNav + TabView ----
+Element settingsBody(skiff::components::StateView& st) {
+    State<std::string>& page = st.get<std::string>("page");
+    State<int>& tab = st.get<int>("tab");
+    State<int>& brightness = st.get<int>("brightness");
+
+    // 顶部导航条:返回按钮 + 标题
+    skiff::components::TopNavOptions navOpt;
+    navOpt.width = 800;
+    navOpt.ttfPath = kFont;
+    navOpt.bgColor = 0x1A222B;
+    navOpt.hasBg = true;
+    navOpt.leading = skiff::Button("返回主页", [&page] { page.set("home"); })
+        .size(140, 36).bg(kTile).ttf(kFont, 16).fg(kHi);
+    navOpt.hasLeading = true;
+
+    skiff::components::TabViewOptions opt;
     opt.width = 800;
-    opt.height = 480;
+    opt.height = 480 - 48;
     opt.ttfPath = kFont;
     opt.activeBg = kNavi;
     opt.inactiveBg = kTile;
     opt.contentBg = kTile;
     opt.hasContentBg = true;
-    opt.menuFooter = skiff::Button("返回主页", [&page] { page.set("home"); })
-        .size(180, 48).bg(0x3A4A5C).ttf(kFont, 18).fg(kHi);
-    opt.hasMenuFooter = true;
-    return skiff::components::Sidebar({
+    return skiff::VStack({
+        skiff::components::TopNav("设置", navOpt),
+        skiff::components::TabView({
             {"网络", networkSubmenu()},
             {"显示", displaySubmenu(brightness)},
             {"声音", soundSubmenu()},
             {"系统", systemSubmenu()},
-        }, tab.get(), tab, opt).bg(kBg);
+        }, tab, opt),
+    }, 0).size(800, 480).bg(kBg);
 }
 
 } // namespace
@@ -199,19 +215,28 @@ int main() {
     lv_init();
     skiff::lvgl::createSdl3Display(800, 480, "skiff - PND home");
 
-    State<std::string> page("home");
-    State<int> settingsTab(0);
-    State<int> brightness(80);
+    State<std::string> page("home");   // 全局导航状态(哪个页面)
+
+    // 各页面:PageView(名字 + 状态声明),组件树由各自的 body 函数生成
+    skiff::components::PageView homePage("home", {
+        skiff::components::stateRef("page", page),
+    });
+    skiff::components::PageView settingsPage("设置", {
+        skiff::components::stateRef("page", page),
+        skiff::components::state<int>("tab", 0),         // 侧栏当前选中项
+        skiff::components::state<int>("brightness", 80), // 亮度滑条
+    });
 
     skiff::lvgl::LvglBackend backend(lv_scr_act());
-    skiff::App app(backend, [&page, &settingsTab, &brightness]() -> Element {
-        if (page.get() == "home") return homePage(page);
-        if (page.get() == "设置") return settingsPage(page, settingsTab, brightness);
+    skiff::App app(backend, [&page, &homePage, &settingsPage]() -> Element {
+        if (page.get() == homePage.name()) return homePage.render(homeBody);
+        if (page.get() == settingsPage.name()) return settingsPage.render(settingsBody);
         return subPage(page);
     });
-    app.bind(page);
-    app.bind(settingsTab);
-    app.bind(brightness);
+    // 各页面的 stateView 会把本页用到的状态(含导航状态)绑定到 app;
+    // 导航状态被绑定多次,回调等价,后者覆盖前者,效果一致
+    homePage.bind(app);
+    settingsPage.bind(app);
     app.start();
 
     while (skiff::lvgl::sdl3Pump()) {
