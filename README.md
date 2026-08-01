@@ -11,7 +11,7 @@
 
 ```
 include/skiff/          核心:Element / State / App / Backend 接口
-include/skiff/components/ 组合组件(纯 DSL):TabView(页签菜单 + 内容区)、TopNav(顶部导航条)、PageView/StateView(页面 + 页面状态管理)
+include/skiff/components/ 组合组件(纯 DSL):TabView(页签菜单 + 内容区)、TopNav(顶部导航条)、PageView/StateView(页面 + 页面状态管理)、Router(按名字管理页面路由)
 backends/lvgl/          LVGL 后端 + SDL3 宿主 + headless 显示器
 examples/               示例
   counter           无头冒烟测试

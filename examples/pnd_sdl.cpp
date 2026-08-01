@@ -215,28 +215,22 @@ int main() {
     lv_init();
     skiff::lvgl::createSdl3Display(800, 480, "skiff - PND home");
 
-    State<std::string> page("home");   // 全局导航状态(哪个页面)
-
-    // 各页面:PageView(名字 + 状态声明),组件树由各自的 body 函数生成
-    skiff::components::PageView homePage("home", {
-        skiff::components::stateRef("page", page),
-    });
-    skiff::components::PageView settingsPage("设置", {
-        skiff::components::stateRef("page", page),
+    // 路由:按名字注册页面,nav() 为全局导航状态(页面内 nav.set("名") 跳转)
+    skiff::components::Router router("home");
+    router.add("home", {
+        skiff::components::stateRef("page", router.nav()),
+    }, homeBody);
+    router.add("设置", {
+        skiff::components::stateRef("page", router.nav()),
         skiff::components::state<int>("tab", 0),         // 侧栏当前选中项
         skiff::components::state<int>("brightness", 80), // 亮度滑条
-    });
+    }, settingsBody);
+    // 未注册的路由(导航/音乐/...)走兜底演示页
+    router.fallback([&router]() -> Element { return subPage(router.nav()); });
 
     skiff::lvgl::LvglBackend backend(lv_scr_act());
-    skiff::App app(backend, [&page, &homePage, &settingsPage]() -> Element {
-        if (page.get() == homePage.name()) return homePage.render(homeBody);
-        if (page.get() == settingsPage.name()) return settingsPage.render(settingsBody);
-        return subPage(page);
-    });
-    // 各页面的 stateView 会把本页用到的状态(含导航状态)绑定到 app;
-    // 导航状态被绑定多次,回调等价,后者覆盖前者,效果一致
-    homePage.bind(app);
-    settingsPage.bind(app);
+    skiff::App app(backend, [&router]() -> Element { return router.render(); });
+    router.bind(app);
     app.start();
 
     while (skiff::lvgl::sdl3Pump()) {

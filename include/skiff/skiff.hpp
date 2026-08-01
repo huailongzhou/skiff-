@@ -8,3 +8,4 @@
 #include "components/tabview.hpp"
 #include "components/top_nav.hpp"
 #include "components/page_view.hpp"
+#include "components/router.hpp"
