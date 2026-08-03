@@ -6,42 +6,19 @@
 //   ./pnd_mac
 #include <cstdio>
 #include <cstdlib>
+#include <atomic>
+#include <chrono>
 #include <string>
+#include <thread>
 #include <vector>
 
+#include <SDL3/SDL.h>
 #include <CoreGraphics/CoreGraphics.h>
 
 #include "skiff_lvgl.hpp"
 #include "skiff_lvgl_sdl3.hpp"
 #include "skiff/skiff.hpp"
 #include "examples/pnd_sdl.cpp"
-
-// 简单的 macOS 音乐播放器:用 afplay 播放本地音频文件
-namespace {
-
-class AfplayMusicPlayer {
-public:
-    void play(const std::string& path) {
-        stop();
-        std::string cmd = "afplay \"" + path + "\" &";
-        std::system(cmd.c_str());
-        playing_ = true;
-    }
-
-    void stop() {
-        std::system("killall afplay 2>/dev/null");
-        playing_ = false;
-    }
-
-    bool isPlaying() const { return playing_; }
-
-private:
-    bool playing_ = false;
-};
-
-AfplayMusicPlayer gMusicPlayer;
-
-} // namespace
 
 namespace {
 
@@ -58,6 +35,94 @@ bool setMacBrightness(float level) {
 
     DisplayServicesSetBrightness(display, static_cast<double>(level));
     return true;
+}
+
+// macOS 音乐播放器:直接用 SDL3 音频播放 wav(与 Linux 入口保持一致),
+// 支持进度上报;SDL 音频不可用时回退到 afplay。
+class SdlMusicPlayer {
+public:
+    ~SdlMusicPlayer() { stop(); }
+
+    bool play(const std::string& path) {
+        stop();
+        if (!SDL_WasInit(SDL_INIT_AUDIO)) SDL_InitSubSystem(SDL_INIT_AUDIO);
+
+        SDL_AudioSpec spec;
+        if (!SDL_LoadWAV(path.c_str(), &spec, &buf_, &len_)) {
+            std::printf("[MacPlatform] SDL_LoadWAV failed: %s\n", SDL_GetError());
+            buf_ = nullptr;
+            return false;
+        }
+        stream_ = SDL_OpenAudioDeviceStream(SDL_AUDIO_DEVICE_DEFAULT_PLAYBACK,
+                                            &spec, nullptr, nullptr);
+        if (!stream_) {
+            std::printf("[MacPlatform] open audio device failed: %s\n",
+                        SDL_GetError());
+            SDL_free(buf_);
+            buf_ = nullptr;
+            return false;
+        }
+        SDL_PutAudioStreamData(stream_, buf_, (int)len_);
+        SDL_ResumeAudioStreamDevice(stream_);
+        playing_ = true;
+        return true;
+    }
+
+    void stop() {
+        if (stream_) { SDL_DestroyAudioStream(stream_); stream_ = nullptr; }
+        if (buf_) { SDL_free(buf_); buf_ = nullptr; }
+        playing_ = false;
+        // 回退路径可能起过 afplay,一并清掉(无害)
+        std::system("killall afplay 2>/dev/null");
+    }
+
+    bool isPlaying() {
+        if (playing_ && stream_ && SDL_GetAudioStreamQueued(stream_) == 0) {
+            stop();
+        }
+        return playing_;
+    }
+
+    int progressPct() const {
+        if (!playing_ || !stream_ || len_ == 0) return -1;
+        const int queued = SDL_GetAudioStreamQueued(stream_);
+        int pct = (int)((len_ - (Uint32)queued) * 100 / len_);
+        if (pct < 0) pct = 0;
+        if (pct > 100) pct = 100;
+        return pct;
+    }
+
+private:
+    SDL_AudioStream* stream_ = nullptr;
+    Uint8* buf_ = nullptr;
+    Uint32 len_ = 0;
+    bool playing_ = false;
+};
+
+SdlMusicPlayer gMusicPlayer;
+
+// 播放监控:每 500ms 检查进度,经平台事件上报给 UI(在独立线程运行)。
+void musicMonitorLoop(skiff::Platform* platform, std::atomic<bool>* running) {
+    int lastPct = -1;
+    bool wasPlaying = false;
+    while (running->load()) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(500));
+        const int pct = gMusicPlayer.progressPct();
+        if (pct >= 0 && pct != lastPct) {
+            lastPct = pct;
+            platform->emit("musicProgress", {std::to_string(pct)});
+        }
+        const bool playing = gMusicPlayer.isPlaying();
+        if (wasPlaying && !playing) platform->emit("musicEnded", {});
+        wasPlaying = playing;
+        if (!playing) lastPct = -1;
+    }
+}
+
+// afplay 回退:SDL 音频打不开时用系统命令行播放
+void fallbackAfplay(const std::string& path) {
+    std::string cmd = "afplay -q \"" + path + "\" &";
+    std::system(cmd.c_str());
 }
 
 // 注册所有声明的 macOS 平台能力实现
@@ -80,9 +145,14 @@ void registerMacPlatform(skiff::Platform& platform) {
         platform.registerExternal("playMusic",
             [](const std::vector<std::string>& args) {
                 const std::string path = args.empty() ? "" : args[0];
-                if (!path.empty()) {
-                    gMusicPlayer.play(path);
-                    std::printf("[MacPlatform] playMusic %s\n", path.c_str());
+                if (path.empty()) return;
+                if (gMusicPlayer.play(path)) {
+                    std::printf("[MacPlatform] playMusic %s (SDL audio)\n",
+                                path.c_str());
+                } else {
+                    fallbackAfplay(path);
+                    std::printf("[MacPlatform] playMusic %s (afplay fallback)\n",
+                                path.c_str());
                 }
             });
     }
@@ -92,6 +162,17 @@ void registerMacPlatform(skiff::Platform& platform) {
             [](const std::vector<std::string>&) {
                 gMusicPlayer.stop();
                 std::printf("[MacPlatform] stopMusic\n");
+            });
+    }
+
+    if (platform.hasDeclared("openFile")) {
+        platform.registerExternal("openFile",
+            [](const std::vector<std::string>& args) {
+                if (args.empty()) return;
+                const std::string& path = args[0];
+                std::string cmd = "open \"" + path + "\"";
+                std::system(cmd.c_str());
+                std::printf("[MacPlatform] openFile %s\n", path.c_str());
             });
     }
 }
@@ -116,7 +197,15 @@ int main() {
     skiff::input::onSwipeDown(kTopZone, kSwipeThreshold,
                               [&ui]() { ui.toggleMenu(); });
 
-    skiff::lvgl::run(app);
+    // 播放进度上报线程:平台事件 → UI
+    std::atomic<bool> monitorRunning(true);
+    std::thread monitor(musicMonitorLoop, &platform, &monitorRunning);
+
+    skiff::lvgl::run(app, &platform);  // 主循环每帧 pumpEvents 派发平台事件
+
+    monitorRunning = false;
+    monitor.join();
+    gMusicPlayer.stop();  // 先停音频,再销毁 SDL
     skiff::lvgl::destroySdl3Display();
     return 0;
 }

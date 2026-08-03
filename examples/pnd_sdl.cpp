@@ -210,11 +210,13 @@ public:
         globalStatesInit(skiff::components::state::INT, {
             {"brightness", 80},
             {"musicProgress", 0},
+            {"mediaCategory", 0},
         });
         // 声明需要的平台能力,具体实现由平台入口注册
         platform.declare("setBrightness");
         platform.declare("playMusic");
         platform.declare("stopMusic");
+        platform.declare("openFile");
         // 订阅平台事件(平台 → UI 上报,如播放进度)
         platform.on("musicProgress", [this](const std::vector<std::string>& args) {
             if (!args.empty()) {
@@ -306,6 +308,112 @@ private:
                 progressRow,
                 skiff::Spacer(),
             }, 0).size(800, 480).bg(kBg).centered();
+        };
+
+        auto mediaBody = [this](components::StateView&) -> Element {
+            State<int>& category_ = states().get<int>("mediaCategory");
+            const int cat = category_.get();
+
+            struct CatInfo {
+                const char* name;
+                const char* icon;
+                uint32_t color;
+            };
+            const CatInfo cats[4] = {
+                {"视频",   "\xEF\x80\x8F", 0x1565D8},
+                {"音乐",   "\xEF\x80\x81", 0xD84315},
+                {"图片",   "\xEF\x80\xBE", 0x2E7D32},
+                {"电子书", "\xEF\x80\xAD", 0x9AA4B0},
+            };
+
+            Element categoryBar = skiff::HStack({
+                skiff::Button({skiff::Text("视频").ttf(kFont, 16).fg(cat == 0 ? kHi : kLo)},
+                              [&category_] { category_.set(0); })
+                    .size(96, 40).bg(cat == 0 ? cats[0].color : kTile),
+                skiff::Button({skiff::Text("音乐").ttf(kFont, 16).fg(cat == 1 ? kHi : kLo)},
+                              [&category_] { category_.set(1); })
+                    .size(96, 40).bg(cat == 1 ? cats[1].color : kTile),
+                skiff::Button({skiff::Text("图片").ttf(kFont, 16).fg(cat == 2 ? kHi : kLo)},
+                              [&category_] { category_.set(2); })
+                    .size(96, 40).bg(cat == 2 ? cats[2].color : kTile),
+                skiff::Button({skiff::Text("电子书").ttf(kFont, 16).fg(cat == 3 ? kHi : kLo)},
+                              [&category_] { category_.set(3); })
+                    .size(96, 40).bg(cat == 3 ? cats[3].color : kTile),
+            }, 12).size(752, 48).centered();
+
+            // 示例文件列表(后续可替换为平台扫描的真实文件)
+            struct MediaItem {
+                const char* name;
+                const char* path;
+            };
+            std::vector<MediaItem> items;
+            switch (cat) {
+            case 0:
+                items = {{"sample video", "assets/media/sample.mp4"}};
+                break;
+            case 1:
+                items = {{"sample music", "assets/music/sample.wav"}};
+                break;
+            case 2:
+                items = {{"sample image", "assets/media/sample.jpg"}};
+                break;
+            case 3:
+                items = {{"sample ebook", "assets/media/sample.txt"}};
+                break;
+            }
+
+            std::vector<Element> gridItems;
+            for (size_t i = 0; i < items.size(); ++i) {
+                const std::string name = items[i].name;
+                const std::string path = items[i].path;
+                gridItems.push_back(
+                    skiff::Button({
+                        skiff::Text(cats[cat].icon).font(32).fg(kHi),
+                        skiff::Text(name).ttf(kFont, 14).fg(kHi),
+                    }, [this, cat, path] {
+                        if (cat == 1) {
+                            platform().invokeExternal("playMusic", {path});
+                            states().get<bool>("musicPlaying").set(true);
+                        } else {
+                            platform().invokeExternal("openFile", {path});
+                        }
+                    })
+                    .size(140, 120)
+                    .bg(cats[cat].color)
+                    .centered());
+            }
+            if (gridItems.empty()) {
+                gridItems.push_back(
+                    skiff::Text("暂无文件").ttf(kFont, 18).fg(kLo));
+            }
+
+            // 用 HStack 简单排布网格项目(每行最多 4 个)
+            std::vector<Element> rows;
+            for (size_t i = 0; i < gridItems.size(); i += 4) {
+                std::vector<Element> rowItems;
+                for (size_t j = i; j < gridItems.size() && j < i + 4; ++j) {
+                    rowItems.push_back(gridItems[j]);
+                }
+                rows.push_back(skiff::HStack(rowItems, 16).size(752, 120));
+            }
+            Element grid = rows.empty()
+                ? skiff::Text("暂无文件").ttf(kFont, 18).fg(kLo)
+                : skiff::VStack(rows, 16).size(752, 360);
+
+            return skiff::VStack({
+                skiff::components::TopNav({
+                    skiff::components::TopNav::routerHome(router()).ttf(kFont, 16),
+                    skiff::components::TopNav::routerPrev(router()).ttf(kFont, 16),
+                })
+                .title(skiff::Text("多媒体").ttf(kFont, 20))
+                .size(800, 48)
+                .bg(0x1A222B),
+                skiff::Spacer(),
+                categoryBar,
+                skiff::Spacer(),
+                grid,
+                skiff::Spacer(),
+            }, 0).size(800, 480).bg(kBg).pad(12).padTop(0);
         };
 
         auto homeBody = [this](components::StateView&) -> Element {
@@ -409,6 +517,7 @@ private:
 
         router().add("home", {}, homeBody);
         router().add("音乐", {}, musicBody);
+        router().add("多媒体", {}, mediaBody);
         router().add("应用", {}, appGridBody);
         router().add("设置", {
             skiff::components::state::of<int>("tab", 0),
