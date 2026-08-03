@@ -1,18 +1,20 @@
 # Skiff 轻舟
 
-轻舟(Skiff)是一个 **C++11 声明式嵌入式 UI 框架**：像 SwiftUI 一样用函数描述界面，状态驱动更新，后端可插拔。
+轻舟(Skiff)是一个 **C++11 声明式嵌入式 UI 框架**：像 SwiftUI 一样用代码描述界面，状态驱动更新，后端可插拔。
 
 - 核心后端无关(纯头文件 `include/skiff/`)，换后端不改页面代码
-- 元素:VStack / HStack / Text / Button / Spacer / Slider / TabView(页签容器)
+- 元素:`ElementView` 包装 + `VStack` / `HStack` / `Text` / `Button` / `Spacer` / `Slider` / `TabView` / `TapArea` / `External`
+- 组合组件(纯 DSL):`TopNav`(顶部导航条)、`TabView`(页签菜单 + 内容区)、`AppGrid`(分页应用网格)、`DropDown`(下拉菜单)、`List`(垂直列表)、`Router`(页面栈路由)、`AppUi`(应用 UI 基类)
 - 当前后端：**LVGL 8**(嵌入式渲染) + **SDL3**(PC 预览宿主，仅出窗口/输入)
 - 支持 **FreeType 矢量字体**(TTF，任意字号中文)
 
 ## 目录结构
 
 ```
-include/skiff/          核心:Element / State / App / Backend 接口
-include/skiff/components/ 组合组件(纯 DSL):TabView(页签菜单 + 内容区)、TopNav(顶部导航条)、PageView/StateView(页面 + 页面状态管理)、Router(按名字管理页面路由)、AppUi(应用 UI 基类:platform/router/states)
-backends/lvgl/          LVGL 后端 + SDL3 宿主 + headless 显示器
+include/skiff/          核心:Element / ElementView / State / Backend / Platform
+include/skiff/components/ 组合组件(纯 DSL，后端无关)
+include/skiff/elements/   属性描述类(attrOptions、listOptions 等)
+backends/lvgl/          LVGL 后端 + SDL3 宿主
 examples/               示例
   counter           无头冒烟测试
   counter_sdl       SDL3 窗口:计数器
@@ -25,6 +27,8 @@ platforms/              平台入口(挂载 PND UI + 注册平台能力)
 third_party/            vendored 依赖
   lvgl(8.4) / SDL3(3.2.14) / freetype(2.13.2)
 assets/fonts/           示例用字体(仅预览)
+assets/music/           示例音乐
+assets/media/           示例多媒体文件(按需放置)
 ```
 
 ## 构建
@@ -41,6 +45,7 @@ cmake --build build -j
 ```bash
 ./build/counter          # 无头冒烟:状态 → 重建链路
 ./build/counter_sdl      # SDL3 窗口:计数器
+./build/pnd_mac          # SDL3 窗口:车机 PND 主页(macOS 平台入口)
 ./build/pnd_linux        # SDL3 窗口:车机 PND 主页(Linux 平台入口)
 ./build/freetype_check   # FreeType 字体加载与字形覆盖检查
 ```
@@ -55,19 +60,62 @@ cmake --build build-win --target pnd_win -j   # 产出 build-win/pnd_win.exe
 ## 页面长这样
 
 ```cpp
+#include "skiff/skiff.hpp"
+
 skiff::State<int> count(0);
 
-skiff::App app(backend, [&count]() -> skiff::Element {
+auto body = [&count]() -> skiff::Element {
     return skiff::VStack({
         skiff::Text("count = " + std::to_string(count.get())),
         skiff::Button("+1", [&] { count.set(count.get() + 1); }),
-    }, 8);
-});
-app.bind(count);
-app.start();
+    }, 8).size(320, 240).centered();
+};
 ```
 
 状态变化会自动驱动视图重建，后端负责把新的 `Element` 树挂载成原生控件树。
+
+## 复合组件与布局
+
+```cpp
+using namespace skiff;
+using namespace skiff::components;
+
+State<int> tab(0);
+
+Element page = TabView({
+    {"网络", networkSubmenu()},
+    {"显示", displaySubmenu()},
+}, tab)
+    .as<TabViewView>()
+    .applyBgOption({
+        {tabview::first(), elements::state::selected(),   0x1565D8},
+        {tabview::first(), elements::state::unselected(), 0x1A222B},
+        {tabview::content(), elements::state(),           0x000000},
+    })
+    .ttf(kFont, 18)
+    .size(800, 432);
+```
+
+- `ElementView` 提供链式 modifier(`.size()` / `.bg()` / `.ttf()` 等)
+- 复杂组件继承 `ElementView` 并重写 `build()` 展开为通用 `Element` 树
+- 组件专属方法返回组件自身类型;通用方法返回 `ElementView&`，需要继续调用组件方法时用 `.as<T>()` 转回来
+
+## 平台能力 / 外部回调
+
+页面代码只声明需要的能力，具体实现由平台入口注册:
+
+```cpp
+// 页面代码
+platform.declare("setBrightness");
+platform.invokeExternal("setBrightness", {"80"});
+
+// macOS 平台入口
+platform.registerExternal("setBrightness", [](const std::vector<std::string>& args) {
+    // 调用 IOKit / DisplayServices 等具体 API
+});
+```
+
+这样同一份页面代码可以在 PC、嵌入式板、模拟器上运行，只需替换平台入口。
 
 ## 为什么要隔离后端？
 
