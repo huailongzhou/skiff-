@@ -1,0 +1,166 @@
+// AppGrid:手机桌面风格的网格应用入口。
+// 支持多页排列,可配置行列数、滑动方向,内容超出时自动分页并可滑动切换。
+//
+// 用法:
+//   AppGrid(apps)
+//       .cols(4).rows(3)
+//       .horizontal()
+//       .pageSize(800, 400)
+//       .iconSize(40)
+//       .labelSize(16)
+//       .ttf(kFont, 16)
+//       .size(800, 400)
+#pragma once
+
+#include <functional>
+#include <string>
+#include <vector>
+
+#include "../element.hpp"
+
+namespace skiff {
+namespace components {
+
+struct AppIcon {
+    const char* icon;                // 图标:可以是 LVGL 符号字体或任意 UTF-8 文本
+    const char* label;               // 应用名称
+    std::function<void()> onTap;     // 点击回调
+};
+
+// AppGrid 专用属性描述类
+struct AppGridOptions {
+    int cols_, rows_;          // 每页列数/行数
+    bool horizontal_;          // 水平分页还是垂直分页
+    int pageW_, pageH_;        // 单页尺寸
+    int hSpacing_, vSpacing_;  // 单元水平/垂直间距
+    int iconSize_, labelSize_; // 图标与文字字号
+    uint32_t iconColor_, labelColor_; // 图标与文字颜色
+
+    AppGridOptions()
+        : cols_(4), rows_(3), horizontal_(true),
+          pageW_(800), pageH_(400),
+          hSpacing_(16), vSpacing_(24),
+          iconSize_(40), labelSize_(16),
+          iconColor_(0xFFFFFF), labelColor_(0xFFFFFF) {}
+
+    AppGridOptions& cols(int c) { cols_ = c; return *this; }
+    AppGridOptions& rows(int r) { rows_ = r; return *this; }
+    AppGridOptions& horizontal(bool h = true) { horizontal_ = h; return *this; }
+    AppGridOptions& vertical(bool v = true) { horizontal_ = !v; return *this; }
+    AppGridOptions& pageSize(int w, int h) { pageW_ = w; pageH_ = h; return *this; }
+    AppGridOptions& spacing(int h, int v) { hSpacing_ = h; vSpacing_ = v; return *this; }
+    AppGridOptions& iconSize(int px) { iconSize_ = px; return *this; }
+    AppGridOptions& labelSize(int px) { labelSize_ = px; return *this; }
+    AppGridOptions& iconColor(uint32_t c) { iconColor_ = c; return *this; }
+    AppGridOptions& labelColor(uint32_t c) { labelColor_ = c; return *this; }
+};
+
+class AppGrid : public Element {
+public:
+    AppGrid(const std::vector<AppIcon>& apps)
+        : apps_(apps) {
+        options.paddingPx = 16;
+        options.fontPx = 16;
+        rebuild();
+    }
+
+    AppGrid& cols(int c)       { gridOpts_.cols_ = c;       rebuild(); return *this; }
+    AppGrid& rows(int r)       { gridOpts_.rows_ = r;       rebuild(); return *this; }
+    AppGrid& horizontal()      { gridOpts_.horizontal_ = true;  rebuild(); return *this; }
+    AppGrid& vertical()        { gridOpts_.horizontal_ = false; rebuild(); return *this; }
+    AppGrid& pageSize(int w, int h) { gridOpts_.pageSize(w, h); rebuild(); return *this; }
+    AppGrid& padding(int p)    { options.pad(p); rebuild(); return *this; }
+    AppGrid& spacing(int h, int v) { gridOpts_.spacing(h, v); rebuild(); return *this; }
+    AppGrid& iconSize(int px)  { gridOpts_.iconSize_ = px;  rebuild(); return *this; }
+    AppGrid& labelSize(int px) { gridOpts_.labelSize_ = px; rebuild(); return *this; }
+    AppGrid& iconColor(uint32_t c)  { gridOpts_.iconColor_ = c;  rebuild(); return *this; }
+    AppGrid& labelColor(uint32_t c) { gridOpts_.labelColor_ = c; rebuild(); return *this; }
+
+    AppGrid& ttf(const char* path, int px) {
+        options.ttfPath = path; options.fontPx = px; rebuild(); return *this;
+    }
+
+    AppGrid& font(int px) {
+        options.ttfPath.clear(); options.fontPx = px; rebuild(); return *this;
+    }
+
+private:
+    std::vector<AppIcon> apps_;
+    AppGridOptions gridOpts_;
+
+    void rebuild() {
+        const int perPage = gridOpts_.cols_ * gridOpts_.rows_;
+        if (perPage <= 0) {
+            kind = Column;
+            options.spacingPx = 0;
+            children.clear();
+            return;
+        }
+
+        const int pageCount =
+            (static_cast<int>(apps_.size()) + perPage - 1) / perPage;
+
+        const int padding = options.paddingPx;
+        const int pageW = gridOpts_.pageW_;
+        const int pageH = gridOpts_.pageH_;
+        const int hSpacing = gridOpts_.hSpacing_;
+        const int vSpacing = gridOpts_.vSpacing_;
+
+        // 单元格可用空间(扣除内边距和间距)
+        const int availW = pageW - 2 * padding;
+        const int availH = pageH - 2 * padding;
+        const int cellW = gridOpts_.cols_ > 0
+                              ? (availW - (gridOpts_.cols_ - 1) * hSpacing) / gridOpts_.cols_
+                              : availW;
+        const int cellH = gridOpts_.rows_ > 0
+                              ? (availH - (gridOpts_.rows_ - 1) * vSpacing) / gridOpts_.rows_
+                              : availH;
+
+        std::vector<Element> pages;
+        for (int p = 0; p < pageCount; ++p) {
+            std::vector<Element> pageRows;
+            for (int r = 0; r < gridOpts_.rows_; ++r) {
+                std::vector<Element> rowItems;
+                for (int c = 0; c < gridOpts_.cols_; ++c) {
+                    const int idx = p * perPage + r * gridOpts_.cols_ + c;
+                    if (idx >= static_cast<int>(apps_.size())) break;
+                    const AppIcon& app = apps_[idx];
+                    Element labelText = skiff::Text(app.label)
+                        .font(gridOpts_.labelSize_)
+                        .fg(gridOpts_.labelColor_);
+                    if (!options.ttfPath.empty()) {
+                        labelText = labelText.ttf(options.ttfPath.c_str(), gridOpts_.labelSize_);
+                    }
+                    Element item = skiff::Button({
+                            skiff::Text(app.icon).font(gridOpts_.iconSize_).fg(gridOpts_.iconColor_),
+                            labelText,
+                        }, app.onTap)
+                        .size(cellW, cellH)
+                        .centered();
+                    rowItems.push_back(item);
+                }
+                if (!rowItems.empty()) {
+                    pageRows.push_back(
+                        skiff::HStack(rowItems, hSpacing)
+                            .size(availW, cellH));
+                }
+            }
+
+            Element page = skiff::VStack(pageRows, vSpacing)
+                .size(pageW, pageH)
+                .pad(padding);
+            pages.push_back(page);
+        }
+
+        kind = gridOpts_.horizontal_ ? Row : Column;
+        options.spacingPx = 0;
+        options.width = pageW;
+        options.height = pageH;
+        options.scrollDir = gridOpts_.horizontal_ ? ScrollHorizontal : ScrollVertical;
+        options.scrollSnap = SnapStart;
+        children = pages;
+    }
+};
+
+} // namespace components
+} // namespace skiff

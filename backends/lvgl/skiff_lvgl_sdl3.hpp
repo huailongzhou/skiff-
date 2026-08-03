@@ -7,6 +7,10 @@
 #include "lvgl.h"
 
 namespace skiff {
+class App;
+}
+
+namespace skiff {
 namespace lvgl {
 
 // 创建 SDL3 窗口并注册为 LVGL 显示 + 指针输入设备。
@@ -14,6 +18,10 @@ lv_disp_t* createSdl3Display(int horRes, int verRes, const char* title);
 
 // 处理 SDL 事件、推进 LVGL tick、做帧间隔;窗口被关闭时返回 false。
 bool sdl3Pump();
+
+// 运行主循环:处理 SDL 事件 + 驱动 LVGL + 刷新 App。
+// 页面代码不再直接调用 lv_timer_handler()。
+void run(skiff::App& app);
 
 void destroySdl3Display();
 

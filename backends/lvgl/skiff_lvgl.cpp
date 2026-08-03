@@ -20,6 +20,60 @@ bool containsCjk(const std::string& s) {
     return false;
 }
 
+// 把 skiff 状态映射到 LVGL 状态 selector
+lv_state_t toLvState(const elements::state& s) {
+    lv_state_t state = LV_STATE_DEFAULT;
+    if (s.has(elements::state::Pressed))  state |= LV_STATE_PRESSED;
+    if (s.has(elements::state::Checked))  state |= LV_STATE_CHECKED;
+    if (s.has(elements::state::Focused))  state |= LV_STATE_FOCUSED;
+    if (s.has(elements::state::Disabled)) state |= LV_STATE_DISABLED;
+    if (s.has(elements::state::Hovered))  state |= LV_STATE_HOVERED;
+    return state;
+}
+
+// 应用 Element 上各状态覆盖的样式(目前支持 bg/fg,后续可扩展 font/size 等)
+void applyStateStyles(lv_obj_t* obj, const Element& e) {
+    for (std::map<elements::state, elements::attrOptions>::const_iterator it =
+             e.stateStyles.begin(); it != e.stateStyles.end(); ++it) {
+        const lv_state_t state = toLvState(it->first);
+        if (it->second.hasBg) {
+            lv_obj_set_style_bg_color(obj, lv_color_hex(it->second.bgColor), state);
+            lv_obj_set_style_bg_opa(obj, LV_OPA_COVER, state);
+        }
+        if (it->second.hasFg) {
+            lv_obj_set_style_text_color(obj, lv_color_hex(it->second.fgColor), state);
+        }
+    }
+}
+
+// 根据 skiff 滚动方向设置 LVGL 滚动方向
+void applyScroll(lv_obj_t* obj, ScrollDir dir, ScrollSnap snap) {
+    lv_dir_t d = LV_DIR_NONE;
+    if (dir == ScrollHorizontal) d = LV_DIR_HOR;
+    else if (dir == ScrollVertical) d = LV_DIR_VER;
+    else if (dir == ScrollBoth) d = LV_DIR_ALL;
+
+    if (d != LV_DIR_NONE) {
+        lv_obj_add_flag(obj, LV_OBJ_FLAG_SCROLLABLE);
+        lv_obj_set_scroll_dir(obj, d);
+        lv_obj_clear_flag(obj, LV_OBJ_FLAG_SCROLL_MOMENTUM);
+    }
+
+    lv_scroll_snap_t s = LV_SCROLL_SNAP_NONE;
+    if (snap == SnapStart) s = LV_SCROLL_SNAP_START;
+    else if (snap == SnapCenter) s = LV_SCROLL_SNAP_CENTER;
+    else if (snap == SnapEnd) s = LV_SCROLL_SNAP_END;
+
+    if (s != LV_SCROLL_SNAP_NONE) {
+        if (dir == ScrollHorizontal || dir == ScrollBoth) {
+            lv_obj_set_scroll_snap_x(obj, s);
+        }
+        if (dir == ScrollVertical || dir == ScrollBoth) {
+            lv_obj_set_scroll_snap_y(obj, s);
+        }
+    }
+}
+
 // 按字号挑内置字体;CJK 内置字体只有 16px。
 const lv_font_t* pickFont(int px, bool cjk) {
     if (cjk) return &lv_font_simsun_16_cjk;
@@ -33,37 +87,65 @@ const lv_font_t* pickFont(int px, bool cjk) {
 
 void applyTextStyleRaw(lv_obj_t* label, const Element& e) {
     const bool cjk = containsCjk(e.text);
-    if (e.fontPx > 0) {
-        lv_obj_set_style_text_font(label, pickFont(e.fontPx, cjk), 0);
+    if (e.options.fontPx > 0) {
+        lv_obj_set_style_text_font(label, pickFont(e.options.fontPx, cjk), 0);
         // CJK 大字号:16px 字体渲染时放大(布局仍按 16px 计算)
-        if (cjk && e.fontPx > 16) {
+        if (cjk && e.options.fontPx > 16) {
             lv_obj_set_style_transform_zoom(label,
-                (lv_coord_t)(e.fontPx * 256 / 16), 0);
+                (lv_coord_t)(e.options.fontPx * 256 / 16), 0);
         }
     }
 }
 
-// 去掉 lv_obj 默认主题的"卡片"外观(白底/边框/阴影/内边距)
+// 去掉 lv_obj 默认主题的"卡片"外观(白底/边框/阴影/内边距/最小尺寸)
 void clearCard(lv_obj_t* obj) {
     lv_obj_set_style_bg_opa(obj, LV_OPA_TRANSP, 0);
     lv_obj_set_style_border_width(obj, 0, 0);
     lv_obj_set_style_shadow_width(obj, 0, 0);
     lv_obj_set_style_radius(obj, 0, 0);
     lv_obj_set_style_pad_all(obj, 0, 0);
+    lv_obj_set_style_min_width(obj, 0, 0);
+    lv_obj_set_style_min_height(obj, 0, 0);
+    lv_obj_set_style_max_width(obj, LV_COORD_MAX, 0);
+    lv_obj_set_style_max_height(obj, LV_COORD_MAX, 0);
+    lv_obj_set_style_outline_width(obj, 0, 0);
+    lv_obj_set_style_outline_pad(obj, 0, 0);
     lv_obj_clear_flag(obj, LV_OBJ_FLAG_SCROLLABLE);
+}
+
+// 根据 Element 的 width/height 或 widthPct/heightPct 设置对象尺寸。
+// pct 优先于 px;都没有则使用 LV_SIZE_CONTENT。
+void applyObjectSize(lv_obj_t* obj, const Element& e, lv_obj_t* parent) {
+    (void)parent;
+    lv_coord_t w = LV_SIZE_CONTENT;
+    lv_coord_t h = LV_SIZE_CONTENT;
+
+    if (e.options.widthPct > 0) {
+        w = lv_pct(e.options.widthPct);
+    } else if (e.options.width > 0) {
+        w = (lv_coord_t)e.options.width;
+    }
+
+    if (e.options.heightPct > 0) {
+        h = lv_pct(e.options.heightPct);
+    } else if (e.options.height > 0) {
+        h = (lv_coord_t)e.options.height;
+    }
+
+    lv_obj_set_size(obj, w, h);
 }
 
 // 应用 Element 的方向性 padding。pad() 会同时设置 paddingPx 与四边;
 // 单独 padTop() 等会覆盖对应边,优先级高于统一的 paddingPx。
 void applyPadding(lv_obj_t* obj, const Element& e) {
-    if (e.paddingTop == e.paddingBottom && e.paddingTop == e.paddingLeft &&
-        e.paddingTop == e.paddingRight) {
-        lv_obj_set_style_pad_all(obj, (lv_coord_t)e.paddingTop, 0);
+    if (e.options.paddingTop == e.options.paddingBottom && e.options.paddingTop == e.options.paddingLeft &&
+        e.options.paddingTop == e.options.paddingRight) {
+        lv_obj_set_style_pad_all(obj, (lv_coord_t)e.options.paddingTop, 0);
     } else {
-        lv_obj_set_style_pad_top(obj, (lv_coord_t)e.paddingTop, 0);
-        lv_obj_set_style_pad_bottom(obj, (lv_coord_t)e.paddingBottom, 0);
-        lv_obj_set_style_pad_left(obj, (lv_coord_t)e.paddingLeft, 0);
-        lv_obj_set_style_pad_right(obj, (lv_coord_t)e.paddingRight, 0);
+        lv_obj_set_style_pad_top(obj, (lv_coord_t)e.options.paddingTop, 0);
+        lv_obj_set_style_pad_bottom(obj, (lv_coord_t)e.options.paddingBottom, 0);
+        lv_obj_set_style_pad_left(obj, (lv_coord_t)e.options.paddingLeft, 0);
+        lv_obj_set_style_pad_right(obj, (lv_coord_t)e.options.paddingRight, 0);
     }
 }
 
@@ -76,11 +158,11 @@ std::vector<Element> getChildElements(const Element& e) {
         Element label;
         label.kind = Element::Text;
         label.text = e.text;
-        label.fontPx = e.fontPx;
-        label.ttfPath = e.ttfPath;
-        if (e.hasFg) {
-            label.hasFg = true;
-            label.fgColor = e.fgColor;
+        label.options.fontPx = e.options.fontPx;
+        label.options.ttfPath = e.options.ttfPath;
+        if (e.options.hasFg) {
+            label.options.hasFg = true;
+            label.options.fgColor = e.options.fgColor;
         }
         result.push_back(label);
     }
@@ -108,6 +190,7 @@ void LvglBackend::clearNode(MountedNode& node) {
     node.children.clear();
     if (node.obj) lv_obj_del(node.obj);
     node.callbacks.clear();  // lv_obj_del 已移除事件,这里释放 std::function
+    // External 等不可见节点 obj 为 nullptr,不需要删除原生对象
 }
 
 bool ensureFreetype() {
@@ -136,64 +219,63 @@ lv_font_t* LvglBackend::getFtFont(const std::string& path, int px) {
 }
 
 void LvglBackend::applyTextStyle(lv_obj_t* label, const Element& e) {
-    if (!e.ttfPath.empty()) {
-        lv_font_t* f = getFtFont(e.ttfPath, e.fontPx > 0 ? e.fontPx : 16);
+    if (!e.options.ttfPath.empty()) {
+        lv_font_t* f = getFtFont(e.options.ttfPath, e.options.fontPx > 0 ? e.options.fontPx : 16);
         if (f != nullptr) lv_obj_set_style_text_font(label, f, 0);
     } else {
         applyTextStyleRaw(label, e);
     }
-    if (e.hasFg) lv_obj_set_style_text_color(label, lv_color_hex(e.fgColor), 0);
+    if (e.options.hasFg) lv_obj_set_style_text_color(label, lv_color_hex(e.options.fgColor), 0);
 }
 
 // 页签栏(btnmatrix)样式:ttf()/font()/fg() 作用于页签文字,bg() 作用于页签栏底色
 void LvglBackend::applyTabBarStyle(lv_obj_t* tabview, const Element& e) {
     lv_obj_t* btns = lv_tabview_get_tab_btns(tabview);
     lv_font_t* f = nullptr;
-    if (!e.ttfPath.empty()) {
-        f = getFtFont(e.ttfPath, e.fontPx > 0 ? e.fontPx : 16);
-    } else if (e.fontPx > 0) {
+    if (!e.options.ttfPath.empty()) {
+        f = getFtFont(e.options.ttfPath, e.options.fontPx > 0 ? e.options.fontPx : 16);
+    } else if (e.options.fontPx > 0) {
         bool cjk = false;
         for (size_t i = 0; i < e.children.size(); ++i) {
             if (containsCjk(e.children[i].text)) { cjk = true; break; }
         }
-        f = const_cast<lv_font_t*>(pickFont(e.fontPx, cjk));
+        f = const_cast<lv_font_t*>(pickFont(e.options.fontPx, cjk));
     }
     if (f != nullptr) lv_obj_set_style_text_font(btns, f, 0);
-    if (e.hasFg) lv_obj_set_style_text_color(btns, lv_color_hex(e.fgColor), 0);
-    if (e.hasBg) {
-        lv_obj_set_style_bg_color(btns, lv_color_hex(e.bgColor), 0);
+    if (e.options.hasFg) lv_obj_set_style_text_color(btns, lv_color_hex(e.options.fgColor), 0);
+    if (e.options.hasBg) {
+        lv_obj_set_style_bg_color(btns, lv_color_hex(e.options.bgColor), 0);
         lv_obj_set_style_bg_opa(btns, LV_OPA_COVER, 0);
     }
 }
 
 void LvglBackend::updateContainerStyle(lv_obj_t* obj, const Element& oldE,
                                        const Element& newE) {
-    const bool wasAnim = (oldE.animation == Element::SlideInRight);
-    const bool isAnim = (newE.animation == Element::SlideInRight);
+    const bool wasAnim = (oldE.options.animation != None);
+    const bool isAnim = (newE.options.animation != None);
     bool styleChanged = false;
 
     // 动画类型发生变化:整个节点已在 updateNode 中重建,这里不处理
     // 对于已存在的动画节点,不更新其尺寸/浮动状态(创建时一次性确定)
     if (!wasAnim && !isAnim) {
-        if (oldE.width != newE.width || oldE.height != newE.height) {
-            lv_obj_set_size(obj,
-                newE.width > 0 ? (lv_coord_t)newE.width : LV_SIZE_CONTENT,
-                newE.height > 0 ? (lv_coord_t)newE.height : LV_SIZE_CONTENT);
+        if (oldE.options.width != newE.options.width || oldE.options.height != newE.options.height ||
+            oldE.options.widthPct != newE.options.widthPct || oldE.options.heightPct != newE.options.heightPct) {
+            applyObjectSize(obj, newE, lv_obj_get_parent(obj));
             styleChanged = true;
         }
     }
 
-    if (oldE.paddingTop != newE.paddingTop ||
-        oldE.paddingBottom != newE.paddingBottom ||
-        oldE.paddingLeft != newE.paddingLeft ||
-        oldE.paddingRight != newE.paddingRight) {
+    if (oldE.options.paddingTop != newE.options.paddingTop ||
+        oldE.options.paddingBottom != newE.options.paddingBottom ||
+        oldE.options.paddingLeft != newE.options.paddingLeft ||
+        oldE.options.paddingRight != newE.options.paddingRight) {
         applyPadding(obj, newE);
         styleChanged = true;
     }
 
-    if (oldE.hasBg != newE.hasBg || oldE.bgColor != newE.bgColor) {
-        if (newE.hasBg) {
-            lv_obj_set_style_bg_color(obj, lv_color_hex(newE.bgColor), 0);
+    if (oldE.options.hasBg != newE.options.hasBg || oldE.options.bgColor != newE.options.bgColor) {
+        if (newE.options.hasBg) {
+            lv_obj_set_style_bg_color(obj, lv_color_hex(newE.options.bgColor), 0);
             lv_obj_set_style_bg_opa(obj, LV_OPA_COVER, 0);
         } else {
             lv_obj_set_style_bg_opa(obj, LV_OPA_TRANSP, 0);
@@ -201,13 +283,20 @@ void LvglBackend::updateContainerStyle(lv_obj_t* obj, const Element& oldE,
         styleChanged = true;
     }
 
-    if (oldE.flexGrow != newE.flexGrow) {
-        lv_obj_set_flex_grow(obj, newE.flexGrow ? 1 : 0);
+    if (oldE.options.hasRadiusPx != newE.options.hasRadiusPx ||
+        oldE.options.radiusPx != newE.options.radiusPx) {
+        lv_obj_set_style_radius(obj,
+            newE.options.hasRadiusPx ? (lv_coord_t)newE.options.radiusPx : 0, 0);
         styleChanged = true;
     }
 
-    if (oldE.center != newE.center) {
-        if (newE.center)
+    if (oldE.options.flexGrow != newE.options.flexGrow) {
+        lv_obj_set_flex_grow(obj, newE.options.flexGrow ? 1 : 0);
+        styleChanged = true;
+    }
+
+    if (oldE.options.center != newE.options.center) {
+        if (newE.options.center)
             lv_obj_set_flex_align(obj, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER,
                                   LV_FLEX_ALIGN_CENTER);
         else
@@ -217,12 +306,21 @@ void LvglBackend::updateContainerStyle(lv_obj_t* obj, const Element& oldE,
     }
 
     // 容器主轴/交叉轴间距
-    if (oldE.spacing != newE.spacing) {
+    if (oldE.options.spacingPx != newE.options.spacingPx) {
         if (newE.kind == Element::Column || newE.kind == Element::Button) {
-            lv_obj_set_style_pad_row(obj, (lv_coord_t)newE.spacing, 0);
+            lv_obj_set_style_pad_row(obj, (lv_coord_t)newE.options.spacingPx, 0);
         } else {
-            lv_obj_set_style_pad_column(obj, (lv_coord_t)newE.spacing, 0);
+            lv_obj_set_style_pad_column(obj, (lv_coord_t)newE.options.spacingPx, 0);
         }
+        styleChanged = true;
+    }
+
+    // 水平对齐(仅 floating 节点生效)
+    if (newE.options.isFloating && oldE.options.hAlign != newE.options.hAlign) {
+        lv_align_t a = LV_ALIGN_TOP_LEFT;
+        if (newE.options.hAlign == elements::HAlignCenter) a = LV_ALIGN_TOP_MID;
+        else if (newE.options.hAlign == elements::HAlignEnd) a = LV_ALIGN_TOP_RIGHT;
+        lv_obj_align(obj, a, 0, 0);
         styleChanged = true;
     }
 
@@ -239,26 +337,51 @@ lv_obj_t* LvglBackend::buildNode(const Element& e, lv_obj_t* parent,
         const bool col = (e.kind == Element::Column);
         obj = lv_obj_create(parent);
         clearCard(obj);
-        lv_obj_set_size(obj,
-            e.width > 0 ? (lv_coord_t)e.width : LV_SIZE_CONTENT,
-            e.height > 0 ? (lv_coord_t)e.height : LV_SIZE_CONTENT);
+        applyObjectSize(obj, e, parent);
         lv_obj_set_flex_flow(obj, col ? LV_FLEX_FLOW_COLUMN : LV_FLEX_FLOW_ROW);
-        if (e.flexGrow) lv_obj_set_flex_grow(obj, 1);
+        if (e.options.flexGrow) lv_obj_set_flex_grow(obj, 1);
         applyPadding(obj, e);
-        if (e.hasBg) {
-            lv_obj_set_style_bg_color(obj, lv_color_hex(e.bgColor), 0);
+        if (e.options.hasBg) {
+            lv_obj_set_style_bg_color(obj, lv_color_hex(e.options.bgColor), 0);
             lv_obj_set_style_bg_opa(obj, LV_OPA_COVER, 0);
         }
-        if (e.spacing > 0) {
-            if (col) lv_obj_set_style_pad_row(obj, (lv_coord_t)e.spacing, 0);
-            else     lv_obj_set_style_pad_column(obj, (lv_coord_t)e.spacing, 0);
+        if (e.options.spacingPx > 0) {
+            if (col) lv_obj_set_style_pad_row(obj, (lv_coord_t)e.options.spacingPx, 0);
+            else     lv_obj_set_style_pad_column(obj, (lv_coord_t)e.options.spacingPx, 0);
         }
-        if (e.center) {
+        if (e.options.center) {
             lv_obj_set_flex_align(obj, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER,
                                   LV_FLEX_ALIGN_CENTER);
         }
-        if (e.animation == Element::SlideInRight) {
+        applyStateStyles(obj, e);
+        applyScroll(obj, e.options.scrollDir, e.options.scrollSnap);
+        if (e.options.isFloating ||
+            e.options.animation == SlideInRight ||
+            e.options.animation == SlideInDown) {
             lv_obj_add_flag(obj, LV_OBJ_FLAG_FLOATING);
+        }
+        if (e.options.isFloating && e.options.hAlign != elements::HAlignStart) {
+            lv_align_t a = LV_ALIGN_TOP_LEFT;
+            if (e.options.hAlign == elements::HAlignCenter) a = LV_ALIGN_TOP_MID;
+            else if (e.options.hAlign == elements::HAlignEnd) a = LV_ALIGN_TOP_RIGHT;
+            lv_obj_align(obj, a, 0, 0);
+        }
+        break;
+    }
+    case Element::TapArea: {
+        // 透明点击区:不渲染,只收点击事件
+        obj = lv_obj_create(parent);
+        clearCard(obj);
+        applyObjectSize(obj, e, parent);
+        lv_obj_add_flag(obj, LV_OBJ_FLAG_CLICKABLE);
+        if (e.options.isFloating) lv_obj_add_flag(obj, LV_OBJ_FLAG_FLOATING);
+        if (e.onTap) {
+            MountedNode tmp;
+            tmp.callbacks.push_back(std::unique_ptr<std::function<void()> >(
+                new std::function<void()>(e.onTap)));
+            lv_obj_add_event_cb(obj, &LvglBackend::onClicked, LV_EVENT_CLICKED,
+                                tmp.callbacks.back().get());
+            if (out) out->callbacks.push_back(std::move(tmp.callbacks.back()));
         }
         break;
     }
@@ -272,32 +395,48 @@ lv_obj_t* LvglBackend::buildNode(const Element& e, lv_obj_t* parent,
         obj = lv_label_create(parent);
         lv_label_set_text(obj, e.text.c_str());
         applyTextStyle(obj, e);
-        if (e.width > 0 || e.height > 0) {
-            lv_obj_set_size(obj,
-                e.width > 0 ? (lv_coord_t)e.width : LV_SIZE_CONTENT,
-                e.height > 0 ? (lv_coord_t)e.height : LV_SIZE_CONTENT);
+        applyStateStyles(obj, e);
+        if (e.options.width > 0 || e.options.height > 0 ||
+            e.options.widthPct > 0 || e.options.heightPct > 0) {
+            applyObjectSize(obj, e, parent);
         }
         break;
     }
     case Element::Button: {
         obj = lv_btn_create(parent);
         lv_obj_clear_flag(obj, LV_OBJ_FLAG_SCROLLABLE);
-        lv_obj_set_size(obj,
-            e.width > 0 ? (lv_coord_t)e.width : LV_SIZE_CONTENT,
-            e.height > 0 ? (lv_coord_t)e.height : LV_SIZE_CONTENT);
+        lv_obj_add_flag(obj, LV_OBJ_FLAG_PRESS_LOCK);
+        // 去掉默认主题的阴影/边框/最小尺寸,避免点击区域大于 size
+        lv_obj_set_style_shadow_width(obj, 0, 0);
+        lv_obj_set_style_border_width(obj, 0, 0);
+        if (e.options.hasRadiusPx) {
+            lv_obj_set_style_radius(obj, (lv_coord_t)e.options.radiusPx, 0);
+        } else {
+            lv_obj_set_style_radius(obj, 0, 0);
+        }
+        lv_obj_set_style_pad_all(obj, 0, 0);
+        lv_obj_set_style_min_width(obj, 0, 0);
+        lv_obj_set_style_min_height(obj, 0, 0);
+        lv_obj_set_style_max_width(obj, LV_COORD_MAX, 0);
+        lv_obj_set_style_max_height(obj, LV_COORD_MAX, 0);
+        lv_obj_set_style_outline_width(obj, 0, 0);
+        lv_obj_set_style_outline_pad(obj, 0, 0);
+        applyObjectSize(obj, e, parent);
         lv_obj_set_flex_flow(obj, LV_FLEX_FLOW_COLUMN);
-        if (e.flexGrow) lv_obj_set_flex_grow(obj, 1);
+        if (e.options.flexGrow) lv_obj_set_flex_grow(obj, 1);
         applyPadding(obj, e);
-        if (e.hasBg) {
-            lv_obj_set_style_bg_color(obj, lv_color_hex(e.bgColor), 0);
+        if (e.options.hasBg) {
+            lv_obj_set_style_bg_color(obj, lv_color_hex(e.options.bgColor), 0);
+            lv_obj_set_style_bg_opa(obj, LV_OPA_COVER, 0);
         }
-        if (e.spacing > 0) {
-            lv_obj_set_style_pad_row(obj, (lv_coord_t)e.spacing, 0);
+        if (e.options.spacingPx > 0) {
+            lv_obj_set_style_pad_row(obj, (lv_coord_t)e.options.spacingPx, 0);
         }
-        if (e.center) {
+        if (e.options.center) {
             lv_obj_set_flex_align(obj, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER,
                                   LV_FLEX_ALIGN_CENTER);
         }
+        applyStateStyles(obj, e);
         if (e.onTap) {
             MountedNode tmp;  // 临时占位,构建完再合并回调
             tmp.callbacks.push_back(std::unique_ptr<std::function<void()> >(
@@ -312,11 +451,8 @@ lv_obj_t* LvglBackend::buildNode(const Element& e, lv_obj_t* parent,
         obj = lv_slider_create(parent);
         lv_slider_set_range(obj, e.min, e.max);
         lv_slider_set_value(obj, e.value, LV_ANIM_OFF);
-        if (e.width > 0 || e.height > 0) {
-            lv_obj_set_size(obj,
-                e.width > 0 ? (lv_coord_t)e.width : LV_SIZE_CONTENT,
-                e.height > 0 ? (lv_coord_t)e.height : LV_SIZE_CONTENT);
-        }
+        applyStateStyles(obj, e);
+        applyObjectSize(obj, e, parent);
         if (e.onValueChange) {
             MountedNode tmp;
             std::function<void(int)> cb = e.onValueChange;
@@ -330,13 +466,16 @@ lv_obj_t* LvglBackend::buildNode(const Element& e, lv_obj_t* parent,
         }
         break;
     }
+    case Element::External: {
+        // Platform 能力由使用者在页面代码中显式调用,框架不自动处理
+        obj = nullptr;
+        break;
+    }
     case Element::TabView: {
         obj = lv_tabview_create(parent, LV_DIR_TOP, 48);
         clearCard(obj);  // 根对象去掉默认主题白底卡片样式
-        lv_obj_set_size(obj,
-            e.width > 0 ? (lv_coord_t)e.width : LV_SIZE_CONTENT,
-            e.height > 0 ? (lv_coord_t)e.height : LV_SIZE_CONTENT);
-        if (e.flexGrow) lv_obj_set_flex_grow(obj, 1);
+        applyObjectSize(obj, e, parent);
+        if (e.options.flexGrow) lv_obj_set_flex_grow(obj, 1);
         applyTabBarStyle(obj, e);
         clearCard(lv_tabview_get_content(obj));  // 内容容器去掉默认主题白底
         // 每个 child 是一个页签:text 为标题,内容构建在该页签的 page 里
@@ -379,8 +518,10 @@ lv_obj_t* LvglBackend::buildNode(const Element& e, lv_obj_t* parent,
         }
     }
 
-    if (e.animation == Element::SlideInRight && obj) {
-        newAnims_.push_back(NewAnim{obj, parent});
+    if (e.options.animation == SlideInRight && obj) {
+        newAnims_.push_back(NewAnim{NewAnim::Right, obj, parent});
+    } else if (e.options.animation == SlideInDown && obj) {
+        newAnims_.push_back(NewAnim{NewAnim::Down, obj, parent});
     }
 
     return obj;
@@ -404,13 +545,19 @@ void LvglBackend::updateNode(MountedNode& old, const Element& newE) {
     }
 
     if (old.element.kind != newE.kind || tabStructureChanged ||
-        (old.element.animation == Element::SlideInRight) !=
-            (newE.animation == Element::SlideInRight) ||
+        old.element.stateStyles != newE.stateStyles ||
+        old.element.options.scrollDir != newE.options.scrollDir ||
+        old.element.options.scrollSnap != newE.options.scrollSnap ||
+        (old.element.options.animation == SlideInRight) !=
+            (newE.options.animation == SlideInRight) ||
+        (old.element.options.animation == SlideInDown) !=
+            (newE.options.animation == SlideInDown) ||
         (!old.element.onTap && newE.onTap) || (old.element.onTap && !newE.onTap) ||
         (!old.element.onValueChange && newE.onValueChange) ||
         (old.element.onValueChange && !newE.onValueChange)) {
-        // 类型/动画/回调有无发生变化:整子树重建
-        lv_obj_t* parent = lv_obj_get_parent(old.obj);  // 先保存父节点
+        // 类型/动画/回调发生变化:整子树重建
+        // External 等不可见节点 obj 可能为 nullptr,直接用父容器作为挂载点
+        lv_obj_t* parent = old.obj ? lv_obj_get_parent(old.obj) : nullptr;
         clearNode(old);
         old.element = newE;
         old.obj = buildNode(newE, parent, &old);
@@ -429,21 +576,26 @@ void LvglBackend::updateNode(MountedNode& old, const Element& newE) {
     case Element::Spacer:
         // spacer 无属性可更新
         break;
+    case Element::External:
+        // external 已在上面 rebuild 条件中处理(参数变化时触发),这里无需操作
+        break;
+    case Element::TapArea:
+        // TapArea 无样式/尺寸之外的属性需要更新;尺寸变化在初始条件里会触发重建
+        break;
     case Element::Text: {
         if (old.element.text != newE.text) {
             lv_label_set_text(obj, newE.text.c_str());
         }
         if (old.element.text != newE.text ||
-            old.element.fontPx != newE.fontPx ||
-            old.element.ttfPath != newE.ttfPath ||
-            old.element.hasFg != newE.hasFg ||
-            old.element.fgColor != newE.fgColor) {
+            old.element.options.fontPx != newE.options.fontPx ||
+            old.element.options.ttfPath != newE.options.ttfPath ||
+            old.element.options.hasFg != newE.options.hasFg ||
+            old.element.options.fgColor != newE.options.fgColor) {
             applyTextStyle(obj, newE);
         }
-        if (old.element.width != newE.width || old.element.height != newE.height) {
-            lv_obj_set_size(obj,
-                newE.width > 0 ? (lv_coord_t)newE.width : LV_SIZE_CONTENT,
-                newE.height > 0 ? (lv_coord_t)newE.height : LV_SIZE_CONTENT);
+        if (old.element.options.width != newE.options.width || old.element.options.height != newE.options.height ||
+            old.element.options.widthPct != newE.options.widthPct || old.element.options.heightPct != newE.options.heightPct) {
+            applyObjectSize(obj, newE, lv_obj_get_parent(obj));
         }
         break;
     }
@@ -472,24 +624,22 @@ void LvglBackend::updateNode(MountedNode& old, const Element& newE) {
         if (old.element.value != newE.value) {
             lv_slider_set_value(obj, newE.value, LV_ANIM_OFF);
         }
-        if (old.element.width != newE.width || old.element.height != newE.height) {
-            lv_obj_set_size(obj,
-                newE.width > 0 ? (lv_coord_t)newE.width : LV_SIZE_CONTENT,
-                newE.height > 0 ? (lv_coord_t)newE.height : LV_SIZE_CONTENT);
+        if (old.element.options.width != newE.options.width || old.element.options.height != newE.options.height ||
+            old.element.options.widthPct != newE.options.widthPct || old.element.options.heightPct != newE.options.heightPct) {
+            applyObjectSize(obj, newE, lv_obj_get_parent(obj));
         }
         break;
     }
     case Element::TabView: {
         // 结构不变:更新尺寸、页签栏样式,各页内容就地 diff
-        if (old.element.width != newE.width || old.element.height != newE.height) {
-            lv_obj_set_size(obj,
-                newE.width > 0 ? (lv_coord_t)newE.width : LV_SIZE_CONTENT,
-                newE.height > 0 ? (lv_coord_t)newE.height : LV_SIZE_CONTENT);
+        if (old.element.options.width != newE.options.width || old.element.options.height != newE.options.height ||
+            old.element.options.widthPct != newE.options.widthPct || old.element.options.heightPct != newE.options.heightPct) {
+            applyObjectSize(obj, newE, lv_obj_get_parent(obj));
         }
-        if (old.element.fontPx != newE.fontPx ||
-            old.element.ttfPath != newE.ttfPath ||
-            old.element.hasFg != newE.hasFg || old.element.fgColor != newE.fgColor ||
-            old.element.hasBg != newE.hasBg || old.element.bgColor != newE.bgColor) {
+        if (old.element.options.fontPx != newE.options.fontPx ||
+            old.element.options.ttfPath != newE.options.ttfPath ||
+            old.element.options.hasFg != newE.options.hasFg || old.element.options.fgColor != newE.options.fgColor ||
+            old.element.options.hasBg != newE.options.hasBg || old.element.options.bgColor != newE.options.bgColor) {
             applyTabBarStyle(obj, newE);
         }
         for (size_t i = 0; i < newE.children.size(); ++i) {
@@ -506,9 +656,9 @@ LvglBackend::MountedNode* LvglBackend::findMatch(
     std::vector<MountedNode>& oldChildren, const Element& newChild,
     size_t preferredIdx, std::vector<bool>& used) {
     // 1. key 匹配:有 key 的节点只按 key 复用
-    if (!newChild.keyId.empty()) {
+    if (!newChild.options.keyId.empty()) {
         for (size_t j = 0; j < oldChildren.size(); ++j) {
-            if (!used[j] && oldChildren[j].element.keyId == newChild.keyId) {
+            if (!used[j] && oldChildren[j].element.options.keyId == newChild.options.keyId) {
                 return &oldChildren[j];
             }
         }
@@ -518,13 +668,13 @@ LvglBackend::MountedNode* LvglBackend::findMatch(
     // 2. 同位置同类型匹配(仅对无 key 节点)
     if (preferredIdx < oldChildren.size() && !used[preferredIdx] &&
         oldChildren[preferredIdx].element.kind == newChild.kind &&
-        oldChildren[preferredIdx].element.keyId.empty()) {
+        oldChildren[preferredIdx].element.options.keyId.empty()) {
         return &oldChildren[preferredIdx];
     }
 
     // 3. 任意同类型匹配(仅对无 key 节点)
     for (size_t j = 0; j < oldChildren.size(); ++j) {
-        if (!used[j] && oldChildren[j].element.keyId.empty() &&
+        if (!used[j] && oldChildren[j].element.options.keyId.empty() &&
             oldChildren[j].element.kind == newChild.kind) {
             return &oldChildren[j];
         }
@@ -546,14 +696,14 @@ void LvglBackend::diffChildren(MountedNode& parentNode,
             size_t idx = static_cast<size_t>(match - oldChildren.data());
             used[idx] = true;
             MountedNode node = std::move(*match);
-            lv_obj_move_to_index(node.obj, (int32_t)i);
+            if (node.obj) lv_obj_move_to_index(node.obj, (int32_t)i);
             updateNode(node, newChildren[i]);
             nextChildren.push_back(std::move(node));
         } else {
             MountedNode newNode;
             newNode.element = newChildren[i];
             newNode.obj = buildNode(newChildren[i], parentNode.obj, &newNode);
-            lv_obj_move_to_index(newNode.obj, (int32_t)i);
+            if (newNode.obj) lv_obj_move_to_index(newNode.obj, (int32_t)i);
             nextChildren.push_back(std::move(newNode));
         }
     }
@@ -583,15 +733,27 @@ void LvglBackend::playNewAnimations() {
         const lv_coord_t w = lv_obj_get_content_width(a.parent);
         const lv_coord_t h = lv_obj_get_content_height(a.parent);
         if (w <= 0 || h <= 0) continue;
-        lv_obj_set_size(a.obj, w, h);
-        lv_obj_set_x(a.obj, w);
+
         lv_anim_t anim;
         lv_anim_init(&anim);
         lv_anim_set_var(&anim, a.obj);
-        lv_anim_set_values(&anim, w, 0);
-        lv_anim_set_exec_cb(&anim, animSetX);
         lv_anim_set_time(&anim, 300);
         lv_anim_set_path_cb(&anim, lv_anim_path_ease_out);
+
+        if (a.dir == NewAnim::Right) {
+            // 右侧滑入:占满父容器,从右侧外进场
+            lv_obj_set_size(a.obj, w, h);
+            lv_obj_set_x(a.obj, w);
+            lv_anim_set_values(&anim, w, 0);
+            lv_anim_set_exec_cb(&anim, animSetX);
+        } else { // Down
+            // 顶部滑下:保持元素自身高度,从上方外进场
+            const lv_coord_t ownH = lv_obj_get_height(a.obj);
+            if (ownH <= 0) continue;
+            lv_obj_set_y(a.obj, -ownH);
+            lv_anim_set_values(&anim, -ownH, 0);
+            lv_anim_set_exec_cb(&anim, animSetY);
+        }
         lv_anim_start(&anim);
     }
     newAnims_.clear();
@@ -599,6 +761,10 @@ void LvglBackend::playNewAnimations() {
 
 void LvglBackend::animSetX(void* obj, int32_t v) {
     lv_obj_set_x((lv_obj_t*)obj, (lv_coord_t)v);
+}
+
+void LvglBackend::animSetY(void* obj, int32_t v) {
+    lv_obj_set_y((lv_obj_t*)obj, (lv_coord_t)v);
 }
 
 void LvglBackend::onClicked(lv_event_t* e) {

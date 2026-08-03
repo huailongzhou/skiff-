@@ -5,7 +5,6 @@
 #pragma once
 
 #include <functional>
-#include <utility>
 
 #include "element.hpp"
 #include "state.hpp"

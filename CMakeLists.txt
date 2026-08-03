@@ -55,7 +55,15 @@ if(SKIFF_BACKEND_LVGL)
         add_executable(counter_sdl examples/counter_sdl.cpp)
         target_link_libraries(counter_sdl PRIVATE skiff_lvgl_sdl3)
 
-        add_executable(pnd_sdl examples/pnd_sdl.cpp)
-        target_link_libraries(pnd_sdl PRIVATE skiff_lvgl_sdl3)
+        # pnd_sdl.cpp 现在是平台无关的 UI 定义,没有 main,
+        # macOS 入口在 platforms/mac/mac_platform.cpp 中。
+        if(APPLE)
+            add_executable(pnd_mac platforms/mac/mac_platform.cpp)
+            target_include_directories(pnd_mac PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+            target_link_libraries(pnd_mac PRIVATE skiff_lvgl_sdl3)
+            target_link_libraries(pnd_mac PRIVATE
+                "/System/Library/PrivateFrameworks/DisplayServices.framework"
+                "-framework CoreGraphics")
+        endif()
     endif()
 endif()

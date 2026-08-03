@@ -1,49 +1,88 @@
 // TopNav:页面顶部导航条(纯 DSL 组合,后端无关)。
+// TopNav 本身就是一个 Element,所有 Element 的链式 modifier(size/bg/ttf 等)都可用。
 // 左侧可放置返回等操作元素,标题紧随其后。
 #pragma once
 
+#include <initializer_list>
 #include <string>
+#include <vector>
 
 #include "../element.hpp"
+#include "router.hpp"
 
 namespace skiff {
 namespace components {
 
-struct TopNavOptions {
-    int width, height;          // 整体尺寸(px),0 = 按内容自适应
-    int pad;                    // 左右内边距
-    int spacing;                // leading 与标题的间距
-    uint32_t bgColor;           // 背景色(hasBg 为 true 时生效)
-    bool hasBg;
-    uint32_t titleFg;           // 标题文字颜色
-    std::string ttfPath;        // 标题 TTF 字体路径(空 = 后端内置字体)
-    int fontPx;                 // 标题字号
-    bool hasLeading;
-    Element leading;            // 左侧元素(如返回按钮),hasLeading 为 true 时生效
+class TopNav : public Element {
+public:
+    TopNav(std::initializer_list<Element> leading = {}) {
+        init(skiff::Text("").fg(0xFFFFFF), leading);
+    }
 
-    TopNavOptions()
-        : width(0), height(48), pad(8), spacing(12),
-          bgColor(0), hasBg(false), titleFg(0xFFFFFF),
-          fontPx(20), hasLeading(false) {}
+    TopNav(const std::string& title,
+           std::initializer_list<Element> leading = {}) {
+        init(skiff::Text(title).fg(0xFFFFFF), leading);
+    }
+
+    TopNav(Element titleElement,
+           std::initializer_list<Element> leading = {}) {
+        init(titleElement, leading);
+    }
+
+    // 设置标题;可传字符串(默认白色),也可传已设置好样式的 Text Element
+    TopNav& title(const std::string& t) {
+        title_ = skiff::Text(t).fg(0xFFFFFF);
+        rebuildChildren();
+        return *this;
+    }
+
+    TopNav& title(Element t) {
+        title_ = t;
+        rebuildChildren();
+        return *this;
+    }
+
+    // 重新设置左侧操作按钮
+    TopNav& leading(std::initializer_list<Element> leading) {
+        leading_ = leading;
+        rebuildChildren();
+        return *this;
+    }
+
+    // ---- 左侧常用按钮工厂 ----
+    // 返回主页按钮;可通过 Element 的链式 modifier(.ttf/.size/.bg 等)继续调整样式
+    static Element routerHome(Router& router) {
+        return skiff::Button("返回主页", [&router] { router.home(); })
+            .size(140, 36).bg(0x26303B).fg(0xFFFFFF);
+    }
+
+    // 返回上一页按钮(如果上一页状态为 Dead,会自动跳过)
+    static Element routerPrev(Router& router) {
+        return skiff::Button("返回", [&router] { router.pop(); })
+            .size(100, 36).bg(0x26303B).fg(0xFFFFFF);
+    }
+
+private:
+    std::vector<Element> leading_;
+    Element title_;
+
+    void init(Element title, std::initializer_list<Element> leading) {
+        kind = Row;
+        options.height = 48;
+        options.center = true;
+        options.paddingLeft = options.paddingRight = 8;
+        options.spacingPx = 12;
+        title_ = title;
+        leading_ = leading;
+        rebuildChildren();
+    }
+
+    void rebuildChildren() {
+        children = leading_;
+        children.push_back(title_);
+        children.push_back(skiff::Spacer());
+    }
 };
-
-inline Element TopNav(const std::string& title,
-                      const TopNavOptions& opt = TopNavOptions()) {
-    std::vector<Element> children;
-    if (opt.hasLeading) children.push_back(opt.leading);
-    Element t = Text(title).fg(opt.titleFg);
-    if (!opt.ttfPath.empty()) t = t.ttf(opt.ttfPath.c_str(), opt.fontPx);
-    else if (opt.fontPx > 0)  t = t.font(opt.fontPx);
-    children.push_back(t);
-    children.push_back(Spacer());  // 吃掉剩余空间,让内容靠左
-
-    Element bar = HStack(children, opt.spacing)
-        .size(opt.width, opt.height)
-        .padLeft(opt.pad).padRight(opt.pad)
-        .centered();
-    if (opt.hasBg) bar = bar.bg(opt.bgColor);
-    return bar;
-}
 
 } // namespace components
 } // namespace skiff

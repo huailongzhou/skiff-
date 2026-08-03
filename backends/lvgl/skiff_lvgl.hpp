@@ -35,6 +35,7 @@ private:
     };
 
     struct NewAnim {
+        enum Dir { Right, Down } dir;
         lv_obj_t* obj;
         lv_obj_t* parent;
     };
@@ -54,6 +55,7 @@ private:
     static void onClicked(lv_event_t* e);
     static void onSliderChanged(lv_event_t* e);
     static void animSetX(void* obj, int32_t v);
+    static void animSetY(void* obj, int32_t v);
     void playNewAnimations();
 
     lv_obj_t* parent_;

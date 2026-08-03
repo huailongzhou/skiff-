@@ -1,9 +1,15 @@
 // TabView:左侧页签菜单 + 右侧内容区的组合组件(纯 DSL 组合,后端无关)。
+// 现在 TabView 本身就是一个 Element,所有 Element 的链式 modifier 都可用。
 // 选中态由调用方持有的 State<int> 驱动,切换时内容区默认带右滑入动画。
+//
+// 所有与背景色相关的样式统一通过 applyBgOption({{part, state, color}, ...}) 设置,
+// 不再提供 activeBg/inactiveBg/contentBg 等单独方法。
+//
 // 注意:与 element 层的 skiff::TabView(LVGL 页签容器)同名不同义,
 // 使用时带命名空间:skiff::components::TabView。
 #pragma once
 
+#include <map>
 #include <string>
 #include <vector>
 
@@ -18,73 +24,208 @@ struct TabViewItem {
     Element content;      // 该页签对应的内容区
 };
 
+// TabView 专用属性描述类
 struct TabViewOptions {
-    int width, height;          // 整体尺寸(px),0 = 按内容自适应
-    int menuWidth;              // 页签栏宽度
-    int menuPad;                // 页签栏内边距
-    int itemWidth, itemHeight;  // 页签项尺寸
-    int itemSpacing;            // 页签项间距
-    uint32_t activeBg;          // 选中项背景色
-    uint32_t inactiveBg;        // 未选中项背景色
-    uint32_t itemFg;            // 页签项文字颜色
-    uint32_t contentBg;         // 内容区背景色(hasContentBg 为 true 时生效)
-    bool hasContentBg;
-    std::string ttfPath;        // 页签 TTF 字体路径(空 = 后端内置字体)
-    int fontPx;                 // 页签字号
-    bool slideIn;               // 切换时内容区右滑入动画
-    bool hasMenuFooter;
-    Element menuFooter;         // 页签栏底部内容(如返回按钮),hasMenuFooter 为 true 时生效
+    int menuWidth_, menuPad_;
+    int itemWidth_, itemHeight_, itemSpacing_;
+    uint32_t itemFg_;
+    int fontPx_;
+    bool slideIn_;
+    std::string ttfPath_;
 
     TabViewOptions()
-        : width(0), height(0), menuWidth(200), menuPad(10),
-          itemWidth(180), itemHeight(48), itemSpacing(8),
-          activeBg(0x1565D8), inactiveBg(0x26303B), itemFg(0xFFFFFF),
-          contentBg(0), hasContentBg(false), fontPx(18),
-          slideIn(true), hasMenuFooter(false) {}
+        : menuWidth_(200), menuPad_(10),
+          itemWidth_(180), itemHeight_(48), itemSpacing_(8),
+          itemFg_(0xFFFFFF), fontPx_(18), slideIn_(true) {}
+
+    TabViewOptions& menuWidth(int w) { menuWidth_ = w; return *this; }
+    TabViewOptions& menuPad(int p) { menuPad_ = p; return *this; }
+    TabViewOptions& itemSize(int w, int h) {
+        itemWidth_ = w; itemHeight_ = h; return *this;
+    }
+    TabViewOptions& itemSpacing(int s) { itemSpacing_ = s; return *this; }
+    TabViewOptions& itemFg(uint32_t c) { itemFg_ = c; return *this; }
+    TabViewOptions& font(int px) { ttfPath_.clear(); fontPx_ = px; return *this; }
+    TabViewOptions& ttf(const char* path, int px) {
+        ttfPath_ = path; fontPx_ = px; return *this;
+    }
+    TabViewOptions& slideIn(bool s = true) { slideIn_ = s; return *this; }
 };
 
-namespace detail {
+namespace tabview {
 
-inline Element tabMenuItem(const TabViewItem& item, int idx, int active,
-                           State<int>& tab, const TabViewOptions& opt) {
-    Element e = Button(item.title, [&tab, idx] { tab.set(idx); })
-        .size(opt.itemWidth, opt.itemHeight)
-        .bg(idx == active ? opt.activeBg : opt.inactiveBg)
-        .fg(opt.itemFg);
-    if (!opt.ttfPath.empty()) e = e.ttf(opt.ttfPath.c_str(), opt.fontPx);
-    else if (opt.fontPx > 0)  e = e.font(opt.fontPx);
-    return e;
+// TabView 的组成部分标记
+struct part {
+    enum type { first, content } t;
+};
+
+// 左侧一级菜单(页签栏)
+inline part first() {
+    part p; p.t = part::first; return p;
 }
 
-} // namespace detail
+// 右侧内容区
+inline part content() {
+    part p; p.t = part::content; return p;
+}
 
-// items 至少一项;tab.get() 越界时回退到 0
-inline Element TabView(const std::vector<TabViewItem>& items,
-                       State<int>& tab,
-                       const TabViewOptions& opt = TabViewOptions()) {
-    const int active = tab.get();
-    // 页签栏:页签项 + 弹性空白 + 可选底部内容
-    std::vector<Element> menu;
-    for (size_t i = 0; i < items.size(); ++i) {
-        menu.push_back(detail::tabMenuItem(items[i], (int)i, active, tab, opt));
+// 背景色选项: part + state + color
+struct bgOption {
+    part p;
+    elements::state st;
+    uint32_t color;
+
+    bgOption(part pp, const elements::state& ss, uint32_t c)
+        : p(pp), st(ss), color(c) {}
+};
+
+} // namespace tabview
+
+// TabView 类:继承 Element,可直接放入 VStack/HStack
+class TabView : public Element {
+public:
+    TabView(const std::vector<TabViewItem>& items, State<int>& tab)
+        : items_(items), tab_(&tab) {
+        kind = Row;
+        options.spacingPx = 0;
+        rebuild();
     }
-    menu.push_back(Spacer());
-    if (opt.hasMenuFooter) menu.push_back(opt.menuFooter);
-    Element tabBar = VStack(menu, opt.itemSpacing)
-        .size(opt.menuWidth, opt.height)
-        .pad(opt.menuPad);
 
-    // 内容区:当前项;key 用索引区分,切换时整棵重建以播放入场动画
-    int cur = active;
-    if (cur < 0 || cur >= (int)items.size()) cur = 0;
-    Element content = items.empty() ? VStack({}) : items[cur].content;
-    content = content.key(std::to_string(cur).c_str());
-    if (opt.slideIn) content = content.slideInRight();
-    Element contentWrap = VStack({content}, 0).size(0, opt.height).expand();
-    if (opt.hasContentBg) contentWrap = contentWrap.bg(opt.contentBg);
+    // 对指定部分/状态批量应用样式(参考 LVGL 的 state selector)
+    TabView& applyOptions(tabview::part p,
+                          const elements::state& s,
+                          const elements::attrOptions& opt) {
+        if (p.t == tabview::part::first) {
+            firstStyles_[s] = opt;
+        } else {
+            contentStyles_[s] = opt;
+        }
+        rebuild();
+        return *this;
+    }
 
-    return HStack({tabBar, contentWrap}, 0).size(opt.width, opt.height);
-}
+    // 批量设置背景色:{{part, state, color}, ...}
+    // 对 first 部分支持 state::selected()/unselected() 表示选中/未选中项,
+    // 也支持 elements::state::pressed() 等交互状态。
+    TabView& applyBgOption(std::initializer_list<tabview::bgOption> opts) {
+        bgOptions_.assign(opts);
+        rebuild();
+        return *this;
+    }
+
+    // 设置一级菜单项尺寸
+    TabView& itemSize(int w, int h) {
+        tabOpts_.itemSize(w, h); rebuild(); return *this;
+    }
+
+    // 设置菜单栏宽度
+    TabView& menuWidth(int w) {
+        tabOpts_.menuWidth_ = w; rebuild(); return *this;
+    }
+
+    // 页签项文字颜色
+    TabView& itemFg(uint32_t c) {
+        tabOpts_.itemFg_ = c; rebuild(); return *this;
+    }
+
+    // 页签字体
+    TabView& ttf(const char* path, int px) {
+        tabOpts_.ttf(path, px); rebuild(); return *this;
+    }
+
+    TabView& font(int px) {
+        tabOpts_.font(px); rebuild(); return *this;
+    }
+
+private:
+    std::vector<TabViewItem> items_;
+    State<int>* tab_;
+    TabViewOptions tabOpts_;
+
+    std::vector<tabview::bgOption> bgOptions_;
+    std::map<elements::state, elements::attrOptions> firstStyles_;
+    std::map<elements::state, elements::attrOptions> contentStyles_;
+
+    // 判断某个 bgOption 是否为选中/未选中伪状态
+    static bool isSelected(const elements::state& s) {
+        return s.value == elements::state::Selected;
+    }
+    static bool isUnselected(const elements::state& s) {
+        return s.value == elements::state::Unselected;
+    }
+
+    void rebuild() {
+        const int active = tab_->get();
+        const int height = options.height > 0 ? options.height : 432;
+
+        // 左侧页签栏
+        std::vector<Element> menu;
+        for (int i = 0; i < (int)items_.size(); ++i) {
+            State<int>* tabPtr = tab_;
+            int idx = i;
+            Element btn = skiff::Button(items_[i].title,
+                                        [tabPtr, idx] { tabPtr->set(idx); })
+                .size(tabOpts_.itemWidth_, tabOpts_.itemHeight_)
+                .fg(tabOpts_.itemFg_);
+            if (!tabOpts_.ttfPath_.empty()) btn = btn.ttf(tabOpts_.ttfPath_.c_str(), tabOpts_.fontPx_);
+            else if (tabOpts_.fontPx_ > 0)  btn = btn.font(tabOpts_.fontPx_);
+
+            // 应用背景色选项
+            for (const auto& opt : bgOptions_) {
+                if (opt.p.t != tabview::part::first) continue;
+                if (isSelected(opt.st) && i == active) {
+                    btn = btn.bg(opt.color);
+                } else if (isUnselected(opt.st) && i != active) {
+                    btn = btn.bg(opt.color);
+                } else if (!isSelected(opt.st) && !isUnselected(opt.st)) {
+                    btn.applyOptions(opt.st,
+                        elements::attrOptions().bg(opt.color));
+                }
+            }
+
+            // 应用一级菜单各状态样式
+            for (const auto& kv : firstStyles_) {
+                btn.applyOptions(kv.first, kv.second);
+            }
+            menu.push_back(btn);
+        }
+        menu.push_back(skiff::Spacer());
+
+        Element tabBar = skiff::VStack(menu, tabOpts_.itemSpacing_)
+            .size(tabOpts_.menuWidth_, height)
+            .pad(tabOpts_.menuPad_);
+
+        // 右侧内容区
+        int cur = active;
+        if (cur < 0 || cur >= (int)items_.size()) cur = 0;
+        Element content = items_[cur].content;
+        content = content.key(std::to_string(cur).c_str());
+        if (tabOpts_.slideIn_) content = content.slideInRight();
+
+        // 应用内容区各状态样式
+        for (const auto& kv : contentStyles_) {
+            content.applyOptions(kv.first, kv.second);
+        }
+
+        Element contentWrap = skiff::VStack({content}, 0)
+            .size(0, height)
+            .expand();
+
+        // 应用内容区背景色选项:Default 状态直接用 .bg() 合并,
+        // 其他状态才写入 stateStyles,避免覆盖 size/expand 等已有选项
+        for (const auto& opt : bgOptions_) {
+            if (opt.p.t != tabview::part::content) continue;
+            if (opt.st.value == elements::state::Default) {
+                contentWrap = contentWrap.bg(opt.color);
+            } else {
+                contentWrap.applyOptions(opt.st,
+                    elements::attrOptions().bg(opt.color));
+            }
+        }
+
+        children = {tabBar, contentWrap};
+    }
+};
 
 } // namespace components
 } // namespace skiff

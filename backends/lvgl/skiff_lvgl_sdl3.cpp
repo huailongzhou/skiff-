@@ -2,6 +2,9 @@
 
 #include <SDL3/SDL.h>
 
+#include "skiff/backend.hpp"
+#include "skiff/input.hpp"
+
 namespace skiff {
 namespace lvgl {
 
@@ -12,7 +15,10 @@ struct Sdl3Ctx {
     SDL_Renderer* ren;
     SDL_Texture* tex;
     uint64_t lastTick;
-    Sdl3Ctx() : win(nullptr), ren(nullptr), tex(nullptr), lastTick(0) {}
+    int horRes;
+    int verRes;
+    Sdl3Ctx() : win(nullptr), ren(nullptr), tex(nullptr),
+                lastTick(0), horRes(0), verRes(0) {}
 };
 
 Sdl3Ctx g;
@@ -44,6 +50,8 @@ void mouseRead(lv_indev_drv_t*, lv_indev_data_t* data) {
 
 lv_disp_t* createSdl3Display(int horRes, int verRes, const char* title) {
     SDL_Init(SDL_INIT_VIDEO);
+    g.horRes = horRes;
+    g.verRes = verRes;
     g.win = SDL_CreateWindow(title, horRes, verRes, 0);
     g.ren = SDL_CreateRenderer(g.win, nullptr);
     g.tex = SDL_CreateTexture(g.ren, SDL_PIXELFORMAT_ARGB8888,
@@ -77,7 +85,24 @@ bool sdl3Pump() {
     SDL_Event e;
     bool running = true;
     while (SDL_PollEvent(&e)) {
-        if (e.type == SDL_EVENT_QUIT) running = false;
+        if (e.type == SDL_EVENT_QUIT) {
+            running = false;
+        } else if (e.type == SDL_EVENT_MOUSE_BUTTON_DOWN) {
+            skiff::input::pointerDown({e.button.x, e.button.y});
+        } else if (e.type == SDL_EVENT_MOUSE_BUTTON_UP) {
+            skiff::input::pointerUp({e.button.x, e.button.y});
+        } else if (e.type == SDL_EVENT_MOUSE_MOTION) {
+            skiff::input::pointerMove({e.motion.x, e.motion.y});
+        } else if (e.type == SDL_EVENT_FINGER_DOWN) {
+            skiff::input::pointerDown({e.tfinger.x * g.horRes,
+                                       e.tfinger.y * g.verRes});
+        } else if (e.type == SDL_EVENT_FINGER_UP) {
+            skiff::input::pointerUp({e.tfinger.x * g.horRes,
+                                     e.tfinger.y * g.verRes});
+        } else if (e.type == SDL_EVENT_FINGER_MOTION) {
+            skiff::input::pointerMove({e.tfinger.x * g.horRes,
+                                       e.tfinger.y * g.verRes});
+        }
     }
 
     const uint64_t now = SDL_GetTicks();
@@ -86,6 +111,14 @@ bool sdl3Pump() {
 
     SDL_Delay(5);
     return running;
+}
+
+void run(skiff::App& app) {
+    app.start();
+    while (sdl3Pump()) {
+        lv_timer_handler();
+        app.update();
+    }
 }
 
 void destroySdl3Display() {
