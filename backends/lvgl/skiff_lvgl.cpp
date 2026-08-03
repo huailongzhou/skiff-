@@ -140,6 +140,16 @@ void applyObjectSize(lv_obj_t* obj, const Element& e, lv_obj_t* parent) {
     lv_obj_set_size(obj, w, h);
 }
 
+// 应用下边框
+void applyBorderBottom(lv_obj_t* obj, const Element& e) {
+    if (e.options.hasBorderBottom) {
+        lv_obj_set_style_border_color(obj, lv_color_hex(e.options.borderBottomColor), 0);
+        lv_obj_set_style_border_width(obj, (lv_coord_t)e.options.borderBottomWidth, 0);
+        lv_obj_set_style_border_opa(obj, LV_OPA_COVER, 0);
+        lv_obj_set_style_border_side(obj, LV_BORDER_SIDE_BOTTOM, 0);
+    }
+}
+
 // 应用 Element 的方向性 padding。pad() 会同时设置 paddingPx 与四边;
 // 单独 padTop() 等会覆盖对应边,优先级高于统一的 paddingPx。
 void applyPadding(lv_obj_t* obj, const Element& e) {
@@ -332,7 +342,7 @@ void LvglBackend::updateContainerStyle(lv_obj_t* obj, const Element& oldE,
     if (styleChanged) lv_obj_invalidate(obj);
 }
 
-lv_obj_t* LvglBackend::buildNode(const Element& e, lv_obj_t* parent,
+lv_obj_t* LvglBackend::buildNode(Element e, lv_obj_t* parent,
                                  MountedNode* out) {
     lv_obj_t* obj = nullptr;
     std::vector<lv_obj_t*> tabPages;  // TabView:各页签的 page 容器
@@ -342,6 +352,8 @@ lv_obj_t* LvglBackend::buildNode(const Element& e, lv_obj_t* parent,
         const bool col = (e.kind == Element::Column);
         obj = lv_obj_create(parent);
         clearCard(obj);
+        // 普通布局容器不拦截点击,让事件透到 Button/TapArea 等父级可点击对象
+        lv_obj_clear_flag(obj, LV_OBJ_FLAG_CLICKABLE);
         applyObjectSize(obj, e, parent);
         lv_obj_set_flex_flow(obj, col ? LV_FLEX_FLOW_COLUMN : LV_FLEX_FLOW_ROW);
         if (e.options.flexGrow) lv_obj_set_flex_grow(obj, 1);
@@ -358,6 +370,7 @@ lv_obj_t* LvglBackend::buildNode(const Element& e, lv_obj_t* parent,
             lv_obj_set_flex_align(obj, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER,
                                   LV_FLEX_ALIGN_CENTER);
         }
+        applyBorderBottom(obj, e);
         applyStateStyles(obj, e);
         applyScroll(obj, e.options.scrollDir, e.options.scrollSnap);
         if (e.options.isFloating ||
@@ -441,6 +454,7 @@ lv_obj_t* LvglBackend::buildNode(const Element& e, lv_obj_t* parent,
             lv_obj_set_flex_align(obj, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER,
                                   LV_FLEX_ALIGN_CENTER);
         }
+        applyBorderBottom(obj, e);
         applyStateStyles(obj, e);
         if (e.onTap) {
             MountedNode tmp;  // 临时占位,构建完再合并回调
@@ -533,16 +547,18 @@ lv_obj_t* LvglBackend::buildNode(const Element& e, lv_obj_t* parent,
 }
 
 void LvglBackend::updateNode(MountedNode& old, const Element& newE) {
+    const Element& e = newE;
+
     // TabView 页签结构(数量/标题)变化时无法就地更新,需整子树重建
     bool tabStructureChanged = false;
     if (old.element.kind == Element::TabView &&
-        newE.kind == Element::TabView) {
-        if (old.element.children.size() != newE.children.size()) {
+        e.kind == Element::TabView) {
+        if (old.element.children.size() != e.children.size()) {
             tabStructureChanged = true;
         } else {
-            for (size_t i = 0; i < newE.children.size(); ++i) {
+            for (size_t i = 0; i < e.children.size(); ++i) {
                 if (tabTitleOf(old.element.children[i]) !=
-                    tabTitleOf(newE.children[i])) {
+                    tabTitleOf(e.children[i])) {
                     tabStructureChanged = true;
                     break;
                 }
@@ -550,33 +566,33 @@ void LvglBackend::updateNode(MountedNode& old, const Element& newE) {
         }
     }
 
-    if (old.element.kind != newE.kind || tabStructureChanged ||
-        old.element.stateStyles != newE.stateStyles ||
-        old.element.options.scrollDir != newE.options.scrollDir ||
-        old.element.options.scrollSnap != newE.options.scrollSnap ||
+    if (old.element.kind != e.kind || tabStructureChanged ||
+        old.element.stateStyles != e.stateStyles ||
+        old.element.options.scrollDir != e.options.scrollDir ||
+        old.element.options.scrollSnap != e.options.scrollSnap ||
         (old.element.options.animation == SlideInRight) !=
-            (newE.options.animation == SlideInRight) ||
+            (e.options.animation == SlideInRight) ||
         (old.element.options.animation == SlideInDown) !=
-            (newE.options.animation == SlideInDown) ||
-        (!old.element.onTap && newE.onTap) || (old.element.onTap && !newE.onTap) ||
-        (!old.element.onValueChange && newE.onValueChange) ||
-        (old.element.onValueChange && !newE.onValueChange)) {
+            (e.options.animation == SlideInDown) ||
+        (!old.element.onTap && e.onTap) || (old.element.onTap && !e.onTap) ||
+        (!old.element.onValueChange && e.onValueChange) ||
+        (old.element.onValueChange && !e.onValueChange)) {
         // 类型/动画/回调发生变化:整子树重建
         // External 等不可见节点 obj 可能为 nullptr,直接用父容器作为挂载点
         lv_obj_t* parent = old.obj ? lv_obj_get_parent(old.obj) : nullptr;
         clearNode(old);
-        old.element = newE;
-        old.obj = buildNode(newE, parent, &old);
+        old.element = e;
+        old.obj = buildNode(e, parent, &old);
         return;
     }
 
     lv_obj_t* obj = old.obj;
 
-    switch (newE.kind) {
+    switch (e.kind) {
     case Element::Column:
     case Element::Row: {
-        updateContainerStyle(obj, old.element, newE);
-        diffChildren(old, newE.children);
+        updateContainerStyle(obj, old.element, e);
+        diffChildren(old, e.children);
         break;
     }
     case Element::Spacer:
@@ -589,73 +605,73 @@ void LvglBackend::updateNode(MountedNode& old, const Element& newE) {
         // TapArea 无样式/尺寸之外的属性需要更新;尺寸变化在初始条件里会触发重建
         break;
     case Element::Text: {
-        if (old.element.text != newE.text) {
-            lv_label_set_text(obj, newE.text.c_str());
+        if (old.element.text != e.text) {
+            lv_label_set_text(obj, e.text.c_str());
         }
-        if (old.element.text != newE.text ||
-            old.element.options.fontPx != newE.options.fontPx ||
-            old.element.options.ttfPath != newE.options.ttfPath ||
-            old.element.options.hasFg != newE.options.hasFg ||
-            old.element.options.fgColor != newE.options.fgColor) {
-            applyTextStyle(obj, newE);
+        if (old.element.text != e.text ||
+            old.element.options.fontPx != e.options.fontPx ||
+            old.element.options.ttfPath != e.options.ttfPath ||
+            old.element.options.hasFg != e.options.hasFg ||
+            old.element.options.fgColor != e.options.fgColor) {
+            applyTextStyle(obj, e);
         }
-        if (old.element.options.width != newE.options.width || old.element.options.height != newE.options.height ||
-            old.element.options.widthPct != newE.options.widthPct || old.element.options.heightPct != newE.options.heightPct) {
-            applyObjectSize(obj, newE, lv_obj_get_parent(obj));
+        if (old.element.options.width != e.options.width || old.element.options.height != e.options.height ||
+            old.element.options.widthPct != e.options.widthPct || old.element.options.heightPct != e.options.heightPct) {
+            applyObjectSize(obj, e, lv_obj_get_parent(obj));
         }
         break;
     }
     case Element::Button: {
         // 复用旧节点时,lv_btn 上挂的还是旧的 onTap(user_data 指向
         // callbacks[0] 里的 std::function,地址稳定,直接改写内容即可)
-        if (old.element.onTap && newE.onTap && !old.callbacks.empty()) {
-            *old.callbacks[0] = newE.onTap;
+        if (old.element.onTap && e.onTap && !old.callbacks.empty()) {
+            *old.callbacks[0] = e.onTap;
         }
-        updateContainerStyle(obj, old.element, newE);
-        diffChildren(old, getChildElements(newE));
+        updateContainerStyle(obj, old.element, e);
+        diffChildren(old, getChildElements(e));
         break;
     }
     case Element::Slider: {
         // 同 Button:复用节点时更新值变化回调
-        if (old.element.onValueChange && newE.onValueChange &&
+        if (old.element.onValueChange && e.onValueChange &&
             !old.callbacks.empty()) {
-            std::function<void(int)> cb = newE.onValueChange;
+            std::function<void(int)> cb = e.onValueChange;
             *old.callbacks[0] = [obj, cb] {
                 cb(lv_slider_get_value(obj));
             };
         }
-        if (old.element.min != newE.min || old.element.max != newE.max) {
-            lv_slider_set_range(obj, newE.min, newE.max);
+        if (old.element.min != e.min || old.element.max != e.max) {
+            lv_slider_set_range(obj, e.min, e.max);
         }
-        if (old.element.value != newE.value) {
-            lv_slider_set_value(obj, newE.value, LV_ANIM_OFF);
+        if (old.element.value != e.value) {
+            lv_slider_set_value(obj, e.value, LV_ANIM_OFF);
         }
-        if (old.element.options.width != newE.options.width || old.element.options.height != newE.options.height ||
-            old.element.options.widthPct != newE.options.widthPct || old.element.options.heightPct != newE.options.heightPct) {
-            applyObjectSize(obj, newE, lv_obj_get_parent(obj));
+        if (old.element.options.width != e.options.width || old.element.options.height != e.options.height ||
+            old.element.options.widthPct != e.options.widthPct || old.element.options.heightPct != e.options.heightPct) {
+            applyObjectSize(obj, e, lv_obj_get_parent(obj));
         }
         break;
     }
     case Element::TabView: {
         // 结构不变:更新尺寸、页签栏样式,各页内容就地 diff
-        if (old.element.options.width != newE.options.width || old.element.options.height != newE.options.height ||
-            old.element.options.widthPct != newE.options.widthPct || old.element.options.heightPct != newE.options.heightPct) {
-            applyObjectSize(obj, newE, lv_obj_get_parent(obj));
+        if (old.element.options.width != e.options.width || old.element.options.height != e.options.height ||
+            old.element.options.widthPct != e.options.widthPct || old.element.options.heightPct != e.options.heightPct) {
+            applyObjectSize(obj, e, lv_obj_get_parent(obj));
         }
-        if (old.element.options.fontPx != newE.options.fontPx ||
-            old.element.options.ttfPath != newE.options.ttfPath ||
-            old.element.options.hasFg != newE.options.hasFg || old.element.options.fgColor != newE.options.fgColor ||
-            old.element.options.hasBg != newE.options.hasBg || old.element.options.bgColor != newE.options.bgColor) {
-            applyTabBarStyle(obj, newE);
+        if (old.element.options.fontPx != e.options.fontPx ||
+            old.element.options.ttfPath != e.options.ttfPath ||
+            old.element.options.hasFg != e.options.hasFg || old.element.options.fgColor != e.options.fgColor ||
+            old.element.options.hasBg != e.options.hasBg || old.element.options.bgColor != e.options.bgColor) {
+            applyTabBarStyle(obj, e);
         }
-        for (size_t i = 0; i < newE.children.size(); ++i) {
-            updateNode(old.children[i], newE.children[i]);
+        for (size_t i = 0; i < e.children.size(); ++i) {
+            updateNode(old.children[i], e.children[i]);
         }
         break;
     }
     }
 
-    old.element = newE;
+    old.element = e;
 }
 
 LvglBackend::MountedNode* LvglBackend::findMatch(

@@ -1,5 +1,6 @@
 // AppGrid:手机桌面风格的网格应用入口。
 // 支持多页排列,可配置行列数、滑动方向,内容超出时自动分页并可滑动切换。
+// AppGridView 继承 ElementView,可通过 .build() 展开成通用 Element 树。
 //
 // 用法:
 //   AppGrid(apps)
@@ -55,58 +56,44 @@ struct AppGridOptions {
     AppGridOptions& labelColor(uint32_t c) { labelColor_ = c; return *this; }
 };
 
-class AppGrid : public Element {
+class AppGridView : public ElementView {
 public:
-    AppGrid(const std::vector<AppIcon>& apps)
+    AppGridView(const std::vector<AppIcon>& apps)
         : apps_(apps) {
-        options.paddingPx = 16;
-        options.fontPx = 16;
-        rebuild();
+        e_->options.paddingPx = 16;
+        e_->options.fontPx = 16;
     }
 
-    AppGrid& cols(int c)       { gridOpts_.cols_ = c;       rebuild(); return *this; }
-    AppGrid& rows(int r)       { gridOpts_.rows_ = r;       rebuild(); return *this; }
-    AppGrid& horizontal()      { gridOpts_.horizontal_ = true;  rebuild(); return *this; }
-    AppGrid& vertical()        { gridOpts_.horizontal_ = false; rebuild(); return *this; }
-    AppGrid& pageSize(int w, int h) { gridOpts_.pageSize(w, h); rebuild(); return *this; }
-    AppGrid& padding(int p)    { options.pad(p); rebuild(); return *this; }
-    AppGrid& spacing(int h, int v) { gridOpts_.spacing(h, v); rebuild(); return *this; }
-    AppGrid& iconSize(int px)  { gridOpts_.iconSize_ = px;  rebuild(); return *this; }
-    AppGrid& labelSize(int px) { gridOpts_.labelSize_ = px; rebuild(); return *this; }
-    AppGrid& iconColor(uint32_t c)  { gridOpts_.iconColor_ = c;  rebuild(); return *this; }
-    AppGrid& labelColor(uint32_t c) { gridOpts_.labelColor_ = c; rebuild(); return *this; }
+    // AppGrid 专属配置
+    AppGridView& cols(int c)       { gridOpts_.cols_ = c; return *this; }
+    AppGridView& rows(int r)       { gridOpts_.rows_ = r; return *this; }
+    AppGridView& horizontal()      { gridOpts_.horizontal_ = true;  return *this; }
+    AppGridView& vertical()        { gridOpts_.horizontal_ = false; return *this; }
+    AppGridView& pageSize(int w, int h) { gridOpts_.pageSize(w, h); return *this; }
+    AppGridView& spacing(int h, int v) { gridOpts_.spacing(h, v); return *this; }
+    AppGridView& iconSize(int px)  { gridOpts_.iconSize_ = px;  return *this; }
+    AppGridView& labelSize(int px) { gridOpts_.labelSize_ = px; return *this; }
+    AppGridView& iconColor(uint32_t c)  { gridOpts_.iconColor_ = c;  return *this; }
+    AppGridView& labelColor(uint32_t c) { gridOpts_.labelColor_ = c; return *this; }
 
-    AppGrid& ttf(const char* path, int px) {
-        options.ttfPath = path; options.fontPx = px; rebuild(); return *this;
-    }
-
-    AppGrid& font(int px) {
-        options.ttfPath.clear(); options.fontPx = px; rebuild(); return *this;
-    }
-
-private:
-    std::vector<AppIcon> apps_;
-    AppGridOptions gridOpts_;
-
-    void rebuild() {
+    Element build() const override {
         const int perPage = gridOpts_.cols_ * gridOpts_.rows_;
         if (perPage <= 0) {
-            kind = Column;
-            options.spacingPx = 0;
-            children.clear();
-            return;
+            Element empty;
+            empty.kind = Element::Column;
+            empty.options.spacingPx = 0;
+            return empty;
         }
 
         const int pageCount =
             (static_cast<int>(apps_.size()) + perPage - 1) / perPage;
 
-        const int padding = options.paddingPx;
+        const int padding = e_->options.paddingPx;
         const int pageW = gridOpts_.pageW_;
         const int pageH = gridOpts_.pageH_;
         const int hSpacing = gridOpts_.hSpacing_;
         const int vSpacing = gridOpts_.vSpacing_;
 
-        // 单元格可用空间(扣除内边距和间距)
         const int availW = pageW - 2 * padding;
         const int availH = pageH - 2 * padding;
         const int cellW = gridOpts_.cols_ > 0
@@ -125,42 +112,68 @@ private:
                     const int idx = p * perPage + r * gridOpts_.cols_ + c;
                     if (idx >= static_cast<int>(apps_.size())) break;
                     const AppIcon& app = apps_[idx];
-                    Element labelText = skiff::Text(app.label)
-                        .font(gridOpts_.labelSize_)
-                        .fg(gridOpts_.labelColor_);
-                    if (!options.ttfPath.empty()) {
-                        labelText = labelText.ttf(options.ttfPath.c_str(), gridOpts_.labelSize_);
+                    Element labelText;
+                    labelText.kind = Element::Text;
+                    labelText.text = app.label;
+                    labelText.options.fontPx = gridOpts_.labelSize_;
+                    labelText.options.fgColor = gridOpts_.labelColor_;
+                    labelText.options.hasFg = true;
+                    if (!e_->options.ttfPath.empty()) {
+                        labelText.options.ttfPath = e_->options.ttfPath;
                     }
-                    Element item = skiff::Button({
-                            skiff::Text(app.icon).font(gridOpts_.iconSize_).fg(gridOpts_.iconColor_),
-                            labelText,
-                        }, app.onTap)
+
+                    Element iconText;
+                    iconText.kind = Element::Text;
+                    iconText.text = app.icon;
+                    iconText.options.fontPx = gridOpts_.iconSize_;
+                    iconText.options.fgColor = gridOpts_.iconColor_;
+                    iconText.options.hasFg = true;
+                    if (!e_->options.ttfPath.empty()) {
+                        iconText.options.ttfPath = e_->options.ttfPath;
+                    }
+
+                    Element item = skiff::Button({iconText, labelText}, app.onTap)
                         .size(cellW, cellH)
-                        .centered();
+                        .centered()
+                        .build();
                     rowItems.push_back(item);
                 }
                 if (!rowItems.empty()) {
                     pageRows.push_back(
                         skiff::HStack(rowItems, hSpacing)
-                            .size(availW, cellH));
+                            .size(availW, cellH)
+                            .build());
                 }
             }
 
             Element page = skiff::VStack(pageRows, vSpacing)
                 .size(pageW, pageH)
-                .pad(padding);
+                .pad(padding)
+                .build();
             pages.push_back(page);
         }
 
-        kind = gridOpts_.horizontal_ ? Row : Column;
-        options.spacingPx = 0;
-        options.width = pageW;
-        options.height = pageH;
-        options.scrollDir = gridOpts_.horizontal_ ? ScrollHorizontal : ScrollVertical;
-        options.scrollSnap = SnapStart;
-        children = pages;
+        Element root;
+        root.kind = gridOpts_.horizontal_ ? Element::Row : Element::Column;
+        root.options = e_->options;
+        root.options.spacingPx = 0;
+        root.options.width = pageW;
+        root.options.height = pageH;
+        root.options.scrollDir = gridOpts_.horizontal_ ? ScrollHorizontal : ScrollVertical;
+        root.options.scrollSnap = SnapStart;
+        root.children = pages;
+        return root;
     }
+
+private:
+    std::vector<AppIcon> apps_;
+    AppGridOptions gridOpts_;
 };
+
+// 兼容旧写法的工厂函数
+inline AppGridView AppGrid(const std::vector<AppIcon>& apps) {
+    return AppGridView(apps);
+}
 
 } // namespace components
 } // namespace skiff

@@ -237,10 +237,12 @@ static void test_stateview() {
 static void test_tabview_empty() {
     skiff::State<int> tab(0);
     std::vector<comp::TabViewItem> empty;
-    comp::TabView tv(empty, tab);  // 构造即 rebuild,不应越界
+    skiff::Element tv = comp::TabView(empty, tab).build();
     CHECK(tv.children.empty());
-    tv.applyBgOption(
-        {{comp::tabview::first(), skiff::elements::state(), 0x112233}});
+    tv = comp::TabView(empty, tab)
+             .applyBgOption(
+                 {{comp::tabview::first(), skiff::elements::state(), 0x112233}})
+             .build();
     CHECK(tv.children.empty());  // rebuild 对空列表无操作
 }
 
@@ -256,9 +258,10 @@ static void test_tabview_first_default_bg() {
     it.content = skiff::Text("内容二");
     items.push_back(it);
 
-    comp::TabView tv(items, tab);
-    tv.applyBgOption(
-        {{comp::tabview::first(), skiff::elements::state(), 0x112233}});
+    skiff::Element tv = comp::TabView(items, tab)
+                           .applyBgOption(
+                               {{comp::tabview::first(), skiff::elements::state(), 0x112233}})
+                           .build();
 
     // children[0] = 左侧页签栏(VStack),其 children[0] = 第一个按钮
     const skiff::Element& bar = tv.children[0];
@@ -287,10 +290,11 @@ static void test_tabview_select_bg() {
     it.content = skiff::Text("内容二");
     items.push_back(it);
 
-    comp::TabView tv(items, tab);
-    tv.applyBgOption(
-        {{comp::tabview::first(), skiff::elements::state::selected(), 0xAA0000},
-         {comp::tabview::first(), skiff::elements::state::unselected(), 0x00AA00}});
+    skiff::Element tv = comp::TabView(items, tab)
+                           .applyBgOption(
+                               {{comp::tabview::first(), skiff::elements::state::selected(), 0xAA0000},
+                                {comp::tabview::first(), skiff::elements::state::unselected(), 0x00AA00}})
+                           .build();
 
     const skiff::Element& bar = tv.children[0];
     const skiff::Element& active = bar.children[0];    // tab=0,选中
@@ -315,11 +319,12 @@ static void test_tabview_bg_precedence() {
     it.content = skiff::Text("内容二");
     items.push_back(it);
 
-    comp::TabView tv(items, tab);
     // selected 写在 Default 前面(顺序反转也应得到正确结果)
-    tv.applyBgOption(
-        {{comp::tabview::first(), skiff::elements::state::selected(), 0xAA0000},
-         {comp::tabview::first(), skiff::elements::state(), 0x111111}});
+    skiff::Element tv = comp::TabView(items, tab)
+                           .applyBgOption(
+                               {{comp::tabview::first(), skiff::elements::state::selected(), 0xAA0000},
+                                {comp::tabview::first(), skiff::elements::state(), 0x111111}})
+                           .build();
 
     const skiff::Element& bar = tv.children[0];
     const skiff::Element& active = bar.children[0];    // tab=0,选中
@@ -340,8 +345,10 @@ static void test_tabview_content_bg() {
     it.content = skiff::Text("内容一");
     items.push_back(it);
 
-    comp::TabView tv(items, tab);
-    tv.applyBgOption({{comp::tabview::content(), skiff::elements::state(), 0x445566}});
+    skiff::Element tv = comp::TabView(items, tab)
+                           .applyBgOption(
+                               {{comp::tabview::content(), skiff::elements::state(), 0x445566}})
+                           .build();
 
     // children[1] = contentWrap:合并后保留 size/expand,同时获得背景色
     const skiff::Element& wrap = tv.children[1];

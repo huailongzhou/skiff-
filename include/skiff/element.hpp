@@ -3,20 +3,25 @@
 // Element 是对界面的一棵纯数据描述:有什么控件、什么层级、什么样式。
 // 它不持有任何后端对象,由 Backend 把它"挂载"成真实的原生控件树。
 //
-// 常用样式与布局属性统一放在 elements::attrOptions 中管理,
-// Element 通过 `options` 成员访问尺寸、颜色、字体、内边距、动画等。
+// ElementView 是前端的 DSL 包装,提供链式 modifier 与延迟 build() 能力。
+// 复杂组件(如 List)可以继承 ElementView 并重写 build() 来展开成通用 Element 树。
 #pragma once
 
 #include <cstdint>
 #include <functional>
 #include <map>
+#include <memory>
 #include <string>
 #include <utility>
 #include <vector>
 
 #include "elements/attr_options.hpp"
+#include "elements/list_options.hpp"
 
 namespace skiff {
+
+// 前向声明
+class ElementView;
 
 struct Element {
     enum Kind {
@@ -29,7 +34,7 @@ struct Element {
         TabView,  // 页签容器(对应 SwiftUI 的 TabView;children 为各页内容,
                   // 每个 child 的 text 作为该页标题,见 Tab())
         External, // 外部回调声明:不渲染 UI,由后端/板子代码按名字执行具体功能
-        TapArea   // 透明点击区:不渲染 UI,用于捕获点击事件(如关闭浮层)
+        TapArea,  // 透明点击区:不渲染 UI,用于捕获点击事件(如关闭浮层)
     };
 
     Kind kind;
@@ -55,130 +60,6 @@ struct Element {
         : kind(Text), options(), stateStyles(),
           min(0), max(100), value(0) {}
 
-    // ---- 链式修饰器(类似 SwiftUI 的 modifier) ----
-    // 所有样式最终写入 options
-    Element size(int w, int h) const {
-        Element e = *this;
-        e.options.width = w; e.options.height = h;
-        return e;
-    }
-
-    Element sizePct(int w, int h) const {
-        Element e = *this;
-        e.options.widthPct = w; e.options.heightPct = h;
-        return e;
-    }
-
-    Element bg(uint32_t rgb) const {
-        Element e = *this;
-        e.options.bgColor = rgb; e.options.hasBg = true;
-        return e;
-    }
-
-    Element fg(uint32_t rgb) const {
-        Element e = *this;
-        e.options.fgColor = rgb; e.options.hasFg = true;
-        return e;
-    }
-
-    Element font(int px) const {
-        Element e = *this; e.options.fontPx = px; return e;
-    }
-
-    Element itemHeight(int px) const {
-        Element e = *this; e.options.itemHeightPx = px; return e;
-    }
-
-    Element pad(int px) const {
-        Element e = *this;
-        e.options.paddingPx = px;
-        e.options.paddingTop = e.options.paddingBottom =
-            e.options.paddingLeft = e.options.paddingRight = px;
-        return e;
-    }
-
-    Element padTop(int px) const {
-        Element e = *this; e.options.paddingTop = px; return e;
-    }
-
-    Element padBottom(int px) const {
-        Element e = *this; e.options.paddingBottom = px; return e;
-    }
-
-    Element padLeft(int px) const {
-        Element e = *this; e.options.paddingLeft = px; return e;
-    }
-
-    Element padRight(int px) const {
-        Element e = *this; e.options.paddingRight = px; return e;
-    }
-
-    Element ttf(const char* path, int px) const {
-        Element e = *this;
-        e.options.ttfPath = path; e.options.fontPx = px;
-        return e;
-    }
-
-    Element centered() const {
-        Element e = *this; e.options.center = true; return e;
-    }
-
-    Element expand() const {
-        Element e = *this; e.options.flexGrow = true; return e;
-    }
-
-    Element floating() const {
-        Element e = *this; e.options.isFloating = true; return e;
-    }
-
-    Element radius(int px) const {
-        Element e = *this; e.options.radiusPx = px; e.options.hasRadiusPx = true; return e;
-    }
-
-    Element spacing(int px) const {
-        Element e = *this; e.options.spacingPx = px; return e;
-    }
-
-    Element slideInRight() const {
-        Element e = *this; e.options.animation = SlideInRight; return e;
-    }
-
-    Element slideInDown() const {
-        Element e = *this; e.options.animation = SlideInDown; return e;
-    }
-
-    Element key(const char* k) const {
-        Element e = *this; e.options.keyId = k; return e;
-    }
-
-    Element scrollHorizontal() const {
-        Element e = *this; e.options.scrollDir = ScrollHorizontal; return e;
-    }
-
-    Element scrollVertical() const {
-        Element e = *this; e.options.scrollDir = ScrollVertical; return e;
-    }
-
-    Element scrollSnapStart() const {
-        Element e = *this; e.options.scrollSnap = SnapStart; return e;
-    }
-
-    Element scrollSnapCenter() const {
-        Element e = *this; e.options.scrollSnap = SnapCenter; return e;
-    }
-
-    Element alignLeft() const {
-        Element e = *this; e.options.hAlign = elements::HAlignStart; return e;
-    }
-
-    Element alignCenter() const {
-        Element e = *this; e.options.hAlign = elements::HAlignCenter; return e;
-    }
-
-    Element alignRight() const {
-        Element e = *this; e.options.hAlign = elements::HAlignEnd; return e;
-    }
-
     // 声明 Button 点击时触发 external 回调(由后端 registerExternal 实现)
     Element externalTap(const std::string& name,
                         const std::vector<std::string>& args = {}) const {
@@ -203,105 +84,247 @@ struct Element {
     Element& applyOptions(const elements::attrOptions& opt) {
         return applyOptions(elements::state(), opt);
     }
+
+    // Element 是纯数据结构,所有链式 modifier 统一在 ElementView 上实现。
+};
+
+// 前端 DSL 包装:持有 Element 并提供链式 modifier。
+// 复杂组件可继承此类并重写 build() 来延迟展开。
+class ElementView {
+public:
+    ElementView() : e_(new Element()) {}
+    ElementView(const Element& e) : e_(new Element(e)) {}
+    ElementView(Element&& e) : e_(new Element(std::move(e))) {}
+
+    virtual ~ElementView() {}
+
+    // 返回展开后的 Element 树。默认直接返回内部 Element;
+    // 子类(如 ListView)可重写此方法来生成复杂结构。
+    virtual Element build() const { return *e_; }
+
+    // 隐式转换为 Element,方便直接作为 Element 返回
+    operator Element() const { return build(); }
+
+    // ---- 链式修饰器(类似 SwiftUI 的 modifier) ----
+    // 所有样式最终写入内部 Element 的 options
+    ElementView& size(int w, int h) {
+        e_->options.width = w; e_->options.height = h;
+        return *this;
+    }
+
+    ElementView& sizePct(int w, int h) {
+        e_->options.widthPct = w; e_->options.heightPct = h;
+        return *this;
+    }
+
+    ElementView& widthPct(int w) {
+        e_->options.widthPct = w;
+        return *this;
+    }
+
+    ElementView& heightPct(int h) {
+        e_->options.heightPct = h;
+        return *this;
+    }
+
+    ElementView& bg(uint32_t rgb) {
+        e_->options.bgColor = rgb; e_->options.hasBg = true;
+        return *this;
+    }
+
+    ElementView& fg(uint32_t rgb) {
+        e_->options.fgColor = rgb; e_->options.hasFg = true;
+        return *this;
+    }
+
+    ElementView& borderBottom(uint32_t rgb, int widthPx = 1) {
+        e_->options.borderBottomColor = rgb;
+        e_->options.hasBorderBottom = true;
+        e_->options.borderBottomWidth = widthPx;
+        return *this;
+    }
+
+    ElementView& font(int px) {
+        e_->options.fontPx = px; return *this;
+    }
+
+    ElementView& itemHeight(int px) {
+        e_->options.itemHeightPx = px; return *this;
+    }
+
+    ElementView& pad(int px) {
+        e_->options.paddingPx = px;
+        e_->options.paddingTop = e_->options.paddingBottom =
+            e_->options.paddingLeft = e_->options.paddingRight = px;
+        return *this;
+    }
+
+    ElementView& padTop(int px)    { e_->options.paddingTop = px; return *this; }
+    ElementView& padBottom(int px) { e_->options.paddingBottom = px; return *this; }
+    ElementView& padLeft(int px)   { e_->options.paddingLeft = px; return *this; }
+    ElementView& padRight(int px)  { e_->options.paddingRight = px; return *this; }
+
+    ElementView& ttf(const char* path, int px) {
+        e_->options.ttfPath = path; e_->options.fontPx = px;
+        return *this;
+    }
+
+    ElementView& centered() { e_->options.center = true; return *this; }
+    ElementView& expand()   { e_->options.flexGrow = true; return *this; }
+    ElementView& floating() { e_->options.isFloating = true; return *this; }
+
+    ElementView& radius(int px) {
+        e_->options.radiusPx = px; e_->options.hasRadiusPx = true; return *this;
+    }
+
+    ElementView& spacing(int px) {
+        e_->options.spacingPx = px; return *this;
+    }
+
+    ElementView& slideInRight() {
+        e_->options.animation = SlideInRight; return *this;
+    }
+
+    ElementView& slideInDown() {
+        e_->options.animation = SlideInDown; return *this;
+    }
+
+    ElementView& key(const char* k) {
+        e_->options.keyId = k; return *this;
+    }
+
+    ElementView& scrollHorizontal() {
+        e_->options.scrollDir = ScrollHorizontal; return *this;
+    }
+
+    ElementView& scrollVertical() {
+        e_->options.scrollDir = ScrollVertical; return *this;
+    }
+
+    ElementView& scrollSnapStart()  { e_->options.scrollSnap = SnapStart;  return *this; }
+    ElementView& scrollSnapCenter() { e_->options.scrollSnap = SnapCenter; return *this; }
+    ElementView& scrollSnapEnd()    { e_->options.scrollSnap = SnapEnd;    return *this; }
+
+    ElementView& alignLeft()   { e_->options.hAlign = elements::HAlignStart;  return *this; }
+    ElementView& alignCenter() { e_->options.hAlign = elements::HAlignCenter; return *this; }
+    ElementView& alignRight()  { e_->options.hAlign = elements::HAlignEnd;    return *this; }
+
+    // 显式在 ElementView 与子类之间转换,用于链式调用中切换返回类型
+    template <typename T>
+    T& as() {
+        return static_cast<T&>(*this);
+    }
+
+    ElementView& applyOptions(const elements::state& s,
+                              const elements::attrOptions& opt) {
+        if (s.value == elements::state::Default) {
+            e_->options = opt;
+        }
+        e_->stateStyles[s] = opt;
+        return *this;
+    }
+
+    ElementView& applyOptions(const elements::attrOptions& opt) {
+        return applyOptions(elements::state(), opt);
+    }
+
+protected:
+    std::shared_ptr<Element> e_;
 };
 
 // ---- 构建函数:写法上对齐 SwiftUI ----
 
-inline Element Text(std::string text) {
+inline ElementView Text(std::string text) {
     Element e;
     e.kind = Element::Text;
     e.text = std::move(text);
-    return e;
+    return ElementView(std::move(e));
 }
 
-inline Element Button(std::string label, std::function<void()> onTap) {
+inline ElementView Button(std::string label, std::function<void()> onTap) {
     Element e;
     e.kind = Element::Button;
     e.text = std::move(label);
     e.onTap = std::move(onTap);
     e.options.center = true;  // 按钮内容默认居中
-    return e;
+    return ElementView(std::move(e));
 }
 
 // 自定义内容的按钮:Button({ ... 内容 ... }, action)
-inline Element Button(std::vector<Element> content, std::function<void()> onTap) {
+inline ElementView Button(std::vector<Element> content, std::function<void()> onTap) {
     Element e;
     e.kind = Element::Button;
-    e.children = std::move(content);
-    e.onTap = std::move(onTap);
     e.options.center = true;  // 按钮内容默认居中
-    return e;
+    e.onTap = std::move(onTap);
+    e.children = std::move(content);
+    return ElementView(std::move(e));
 }
 
-inline Element Spacer() {
+inline ElementView Spacer() {
     Element e;
     e.kind = Element::Spacer;
-    return e;
+    return ElementView(std::move(e));
 }
 
-inline Element Slider(int value, int min, int max,
-                      std::function<void(int)> onValueChange) {
+inline ElementView Slider(int value, int min, int max,
+                          std::function<void(int)> onValueChange) {
     Element e;
     e.kind = Element::Slider;
     e.value = value;
     e.min = min;
     e.max = max;
     e.onValueChange = std::move(onValueChange);
-    return e;
+    return ElementView(std::move(e));
 }
 
-inline Element VStack(std::vector<Element> children, int spacing = 0) {
+inline ElementView VStack(std::vector<Element> children, int spacing = 0) {
     Element e;
     e.kind = Element::Column;
     e.options.spacingPx = spacing;
     e.children = std::move(children);
-    return e;
+    return ElementView(std::move(e));
 }
 
-inline Element HStack(std::vector<Element> children, int spacing = 0) {
+inline ElementView HStack(std::vector<Element> children, int spacing = 0) {
     Element e;
     e.kind = Element::Row;
     e.options.spacingPx = spacing;
     e.children = std::move(children);
-    return e;
+    return ElementView(std::move(e));
 }
 
 // 一个页签:title 为标题,content 为该页内容。
 // 标题存在独立的 tabTitle 字段,不会覆盖 content 自身的 text(如 Text 内容)。
-inline Element Tab(std::string title, Element content) {
+inline ElementView Tab(std::string title, Element content) {
     content.tabTitle = std::move(title);
-    return content;
+    return ElementView(std::move(content));
 }
 
 // 页签容器:TabView({ Tab("标题1", 内容1), Tab("标题2", 内容2) })
 // font()/ttf()/fg() 作用于页签栏文字
-inline Element TabView(std::vector<Element> tabs) {
+inline ElementView TabView(std::vector<Element> tabs) {
     Element e;
     e.kind = Element::TabView;
     e.children = std::move(tabs);
-    return e;
+    return ElementView(std::move(e));
 }
 
 // 外部回调声明:不渲染 UI,由后端/板子代码按名字实现。
-// 典型用法:放在页面 body 中或作为 Slider/Button 回调的替代,把具体硬件操作
-// 交给 registerExternal 注册的处理器。
-//   External("setBrightness", {std::to_string(brightness.get())})
-inline Element External(std::string name,
-                        std::vector<std::string> args = {}) {
+inline ElementView External(std::string name,
+                            std::vector<std::string> args = {}) {
     Element e;
     e.kind = Element::External;
     e.externalName = std::move(name);
     e.externalArgs = std::move(args);
-    return e;
+    return ElementView(std::move(e));
 }
 
 // 透明点击区:不渲染任何 UI,只响应点击。
-// 典型用法:弹窗/下拉菜单背后的全屏遮罩,点外部关闭。
-inline Element TapArea(std::function<void()> onTap) {
+inline ElementView TapArea(std::function<void()> onTap) {
     Element e;
     e.kind = Element::TapArea;
     e.onTap = std::move(onTap);
-    return e;
+    return ElementView(std::move(e));
 }
 
 } // namespace skiff

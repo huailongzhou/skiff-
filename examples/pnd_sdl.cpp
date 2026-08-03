@@ -9,6 +9,7 @@
 #include "skiff/skiff.hpp"
 
 using skiff::Element;
+using skiff::ElementView;
 using skiff::State;
 
 namespace {
@@ -102,7 +103,7 @@ Element topMenuOverlay(State<bool>& menuExpanded, State<int>& brightness,
                  }},
             }
         })
-        .width(480)
+        .size(480, 0)
         .itemHeight(menuItemH)
         .bg(kTile)
         .ttf(kFont, 16)
@@ -296,8 +297,8 @@ private:
 
             return skiff::VStack({
                 skiff::components::TopNav({
-                    skiff::components::TopNav::routerHome(router()).ttf(kFont, 16),
-                    skiff::components::TopNav::routerPrev(router()).ttf(kFont, 16),
+                    skiff::components::TopNavView::routerHome(router()).ttf(kFont, 16),
+                    skiff::components::TopNavView::routerPrev(router()).ttf(kFont, 16),
                 })
                 .title(skiff::Text("音乐").ttf(kFont, 20))
                 .size(800, 48)
@@ -316,111 +317,69 @@ private:
 
         auto mediaBody = [this](components::StateView&) -> Element {
             State<int>& category_ = states().get<int>("mediaCategory");
-            const int cat = category_.get();
 
-            struct CatInfo {
-                const char* name;
-                const char* icon;
-                uint32_t color;
+            auto makeList = [this](const std::vector<skiff::components::ListItem>& items) -> Element {
+                return skiff::components::List(items)
+                    .itemHeight(64)
+                    .rowBg(0x26303B)   // 列表项背景
+                    .subFg(kLo)
+                    .as<ElementView>()
+                    .ttf(kFont, 16)
+                    .bg(0x1A222B)      // List 容器背景
+                    .fg(kHi)
+                    .size(800, 384);
             };
-            const CatInfo cats[4] = {
-                {"视频",   "\xEF\x80\x8F", 0x1565D8},
-                {"音乐",   "\xEF\x80\x81", 0xD84315},
-                {"图片",   "\xEF\x80\xBE", 0x2E7D32},
-                {"电子书", "\xEF\x80\xAD", 0x9AA4B0},
+
+            std::vector<skiff::components::ListItem> videoItems = {
+                {"sample video",
+                 [this] { platform().invokeExternal("openFile", {"assets/media/sample.mp4"}); }},
             };
-
-            Element categoryBar = skiff::HStack({
-                skiff::Button({skiff::Text("视频").ttf(kFont, 16).fg(cat == 0 ? kHi : kLo)},
-                              [&category_] { category_.set(0); })
-                    .size(96, 40).bg(cat == 0 ? cats[0].color : kTile),
-                skiff::Button({skiff::Text("音乐").ttf(kFont, 16).fg(cat == 1 ? kHi : kLo)},
-                              [&category_] { category_.set(1); })
-                    .size(96, 40).bg(cat == 1 ? cats[1].color : kTile),
-                skiff::Button({skiff::Text("图片").ttf(kFont, 16).fg(cat == 2 ? kHi : kLo)},
-                              [&category_] { category_.set(2); })
-                    .size(96, 40).bg(cat == 2 ? cats[2].color : kTile),
-                skiff::Button({skiff::Text("电子书").ttf(kFont, 16).fg(cat == 3 ? kHi : kLo)},
-                              [&category_] { category_.set(3); })
-                    .size(96, 40).bg(cat == 3 ? cats[3].color : kTile),
-            }, 12).size(752, 48).centered();
-
-            // 示例文件列表(后续可替换为平台扫描的真实文件)
-            struct MediaItem {
-                const char* name;
-                const char* path;
+            std::vector<skiff::components::ListItem> musicItems = {
+                {"Moment of Peace",
+                 [this] {
+                     const std::string track =
+                         "assets/music/mickeyscat-moment-of-peace-mickeyscat-554494.mp3";
+                     states().get<std::string>("currentTrack").set(track);
+                     states().get<int>("musicProgress").set(0);
+                     platform().invokeExternal("stopMusic", {});
+                     platform().invokeExternal("playMusic", {track});
+                     states().get<bool>("musicPlaying").set(true);
+                     router().push("音乐");
+                 }},
             };
-            std::vector<MediaItem> items;
-            switch (cat) {
-            case 0:
-                items = {{"sample video", "assets/media/sample.mp4"}};
-                break;
-            case 1:
-                items = {{"sample music", "assets/music/sample.wav"}};
-                break;
-            case 2:
-                items = {{"sample image", "assets/media/sample.jpg"}};
-                break;
-            case 3:
-                items = {{"sample ebook", "assets/media/sample.txt"}};
-                break;
-            }
-
-            std::vector<Element> gridItems;
-            for (size_t i = 0; i < items.size(); ++i) {
-                const std::string name = items[i].name;
-                const std::string path = items[i].path;
-                gridItems.push_back(
-                    skiff::Button({
-                        skiff::Text(cats[cat].icon).font(32).fg(kHi),
-                        skiff::Text(name).ttf(kFont, 14).fg(kHi),
-                    }, [this, cat, path] {
-                        if (cat == 1) {
-                            states().get<std::string>("currentTrack").set(path);
-                            states().get<bool>("musicPlaying").set(false);
-                            states().get<int>("musicProgress").set(0);
-                            platform().invokeExternal("stopMusic", {});
-                            router().push("音乐");
-                        } else {
-                            platform().invokeExternal("openFile", {path});
-                        }
-                    })
-                    .size(140, 120)
-                    .bg(cats[cat].color)
-                    .centered());
-            }
-            if (gridItems.empty()) {
-                gridItems.push_back(
-                    skiff::Text("暂无文件").ttf(kFont, 18).fg(kLo));
-            }
-
-            // 用 HStack 简单排布网格项目(每行最多 4 个)
-            std::vector<Element> rows;
-            for (size_t i = 0; i < gridItems.size(); i += 4) {
-                std::vector<Element> rowItems;
-                for (size_t j = i; j < gridItems.size() && j < i + 4; ++j) {
-                    rowItems.push_back(gridItems[j]);
-                }
-                rows.push_back(skiff::HStack(rowItems, 16).size(752, 120));
-            }
-            Element grid = rows.empty()
-                ? skiff::Text("暂无文件").ttf(kFont, 18).fg(kLo)
-                : skiff::VStack(rows, 16).size(752, 360);
+            std::vector<skiff::components::ListItem> imageItems = {
+                {"sample image",
+                 [this] { platform().invokeExternal("openFile", {"assets/media/sample.jpg"}); }},
+            };
+            std::vector<skiff::components::ListItem> ebookItems = {
+                {"sample ebook",
+                 [this] { platform().invokeExternal("openFile", {"assets/media/sample.txt"}); }},
+            };
 
             return skiff::VStack({
                 skiff::components::TopNav({
-                    skiff::components::TopNav::routerHome(router()).ttf(kFont, 16),
-                    skiff::components::TopNav::routerPrev(router()).ttf(kFont, 16),
+                    skiff::components::TopNavView::routerHome(router()).ttf(kFont, 16),
+                    skiff::components::TopNavView::routerPrev(router()).ttf(kFont, 16),
                 })
                 .title(skiff::Text("多媒体").ttf(kFont, 20))
                 .size(800, 48)
                 .bg(0x1A222B),
-                skiff::Spacer(),
-                categoryBar,
-                skiff::Spacer(),
-                grid,
-                skiff::Spacer(),
-            }, 0).size(800, 480).bg(kBg).pad(12).padTop(0);
+                skiff::components::TabView({
+                    {"视频",   makeList(videoItems)},
+                    {"音乐",   makeList(musicItems)},
+                    {"图片",   makeList(imageItems)},
+                    {"电子书", makeList(ebookItems)},
+                }, category_)
+                    .as<skiff::components::TabViewView>()
+                    .applyBgOption({
+                        {skiff::components::tabview::first(), skiff::elements::state::selected(),   0x26303B},
+                        {skiff::components::tabview::first(), skiff::elements::state::unselected(), 0x1A222B},
+                        {skiff::components::tabview::first(), skiff::elements::state::pressed(),    0x1565D8},
+                        {skiff::components::tabview::content(), skiff::elements::state(),           kTile},
+                    })
+                    .ttf(kFont, 18)
+                    .size(800, 480 - 48),
+            }, 0).size(800, 480).bg(kBg);
         };
 
         auto homeBody = [this](components::StateView&) -> Element {
@@ -456,8 +415,8 @@ private:
 
             return skiff::VStack({
                 skiff::components::TopNav({
-                    skiff::components::TopNav::routerHome(router()).ttf(kFont, 16),
-                    skiff::components::TopNav::routerPrev(router()).ttf(kFont, 16),
+                    skiff::components::TopNavView::routerHome(router()).ttf(kFont, 16),
+                    skiff::components::TopNavView::routerPrev(router()).ttf(kFont, 16),
                 })
                 .size(800, 48)
                 .bg(0x1A222B),
@@ -467,13 +426,14 @@ private:
                     {"声音", soundSubmenu()},
                     {"系统", systemSubmenu()},
                 }, tab)
-                    .ttf(kFont, 18)
+                    .as<skiff::components::TabViewView>()
                     .applyBgOption({
                         {skiff::components::tabview::first(), skiff::elements::state::selected(), kNavi},
                         {skiff::components::tabview::first(), skiff::elements::state::unselected(), kTile},
                         {skiff::components::tabview::first(), skiff::elements::state::pressed(), 0x2E7D32},
                         {skiff::components::tabview::content(), skiff::elements::state(), 0x000000},
                     })
+                    .ttf(kFont, 18)
                     .size(800, 480 - 48),
             }, 0).size(800, 480).bg(kBg);
         };
@@ -507,8 +467,8 @@ private:
 
             return skiff::VStack({
                 skiff::components::TopNav({
-                    skiff::components::TopNav::routerHome(router()).ttf(kFont, 16),
-                    skiff::components::TopNav::routerPrev(router()).ttf(kFont, 16),
+                    skiff::components::TopNavView::routerHome(router()).ttf(kFont, 16),
+                    skiff::components::TopNavView::routerPrev(router()).ttf(kFont, 16),
                 })
                 .title(skiff::Text("应用").ttf(kFont, 20))
                 .size(800, 48)

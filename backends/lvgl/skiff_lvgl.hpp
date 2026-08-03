@@ -41,7 +41,7 @@ private:
     };
 
     void clearNode(MountedNode& node);
-    lv_obj_t* buildNode(const Element& e, lv_obj_t* parent, MountedNode* out);
+    lv_obj_t* buildNode(Element e, lv_obj_t* parent, MountedNode* out);
     void updateNode(MountedNode& old, const Element& newE);
     void updateContainerStyle(lv_obj_t* obj, const Element& oldE, const Element& newE);
     void diffChildren(MountedNode& parentNode, const std::vector<Element>& newChildren);

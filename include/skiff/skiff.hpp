@@ -12,6 +12,7 @@
 #include "components/tabview.hpp"
 #include "components/top_nav.hpp"
 #include "components/app_grid.hpp"
+#include "components/list.hpp"
 #include "components/drop_down.hpp"
 #include "components/page_view.hpp"
 #include "components/router.hpp"

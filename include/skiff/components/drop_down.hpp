@@ -1,4 +1,5 @@
 // DropDown:下拉菜单面板,支持按钮和滑条两种条目,数量由调用方决定。
+// DropDownView 继承 ElementView,可通过 .build() 展开成通用 Element 树。
 //
 // 用法:
 //   State<bool> expanded(false);
@@ -15,7 +16,7 @@
 //           skiff::layout::grid(2, 2).sizePct(30),  // 2 行 2 列
 //           skiff::layout::grid(2, 1).sizePct(70),  // 2 行 1 列
 //       }))
-//       .width(240).itemHeight(48).bg(kTile).ttf(kFont, 16);
+//       .as<ElementView>().width(240).itemHeight(48).bg(kTile).ttf(kFont, 16);
 //
 //   return VStack({trigger, menu}, 0).size(800, 480);
 #pragma once
@@ -70,21 +71,20 @@ struct DropDownOptions {
     DropDownOptions& marginPct(int pct) { marginPct_ = pct; return *this; }
 };
 
-class DropDown : public Element {
+class DropDownView : public ElementView {
 public:
-    DropDown(const std::vector<DropDownItem>& items, State<bool>& expanded)
+    DropDownView(const std::vector<DropDownItem>& items, State<bool>& expanded)
         : items_(items), expanded_(&expanded) {
         initDefaults_();
     }
 
-    // 无初始条目的构造,条目通过 .adapter({{按钮...}, {滑条...}}) 后续设置
-    explicit DropDown(State<bool>& expanded)
+    explicit DropDownView(State<bool>& expanded)
         : expanded_(&expanded) {
         initDefaults_();
     }
 
     // 批量设置条目:{{按钮组}, {滑条组}}
-    DropDown& adapter(std::initializer_list<std::initializer_list<DropDownItem> > sections) {
+    DropDownView& adapter(std::initializer_list<std::initializer_list<DropDownItem> > sections) {
         items_.clear();
         for (std::initializer_list<std::initializer_list<DropDownItem> >::const_iterator sec = sections.begin();
              sec != sections.end(); ++sec) {
@@ -94,68 +94,46 @@ public:
             }
         }
         ensureDefaultLayout_();
-        rebuild();
         return *this;
     }
 
-    DropDown& layout(const skiff::layout::LayoutItem& l) {
+    DropDownView& layout(const skiff::layout::LayoutItem& l) {
         layout_ = l;
         customLayout_ = true;
-        rebuild();
         return *this;
     }
 
-    DropDown& width(int w) {
-        options.width = w; rebuild(); return *this;
-    }
-
-    DropDown& itemHeight(int h) {
-        options.itemHeightPx = h; rebuild(); return *this;
-    }
-
-    DropDown& bg(uint32_t c) {
-        options.bgColor = c;
-        options.hasBg = true;
-        rebuild();
-        return *this;
-    }
-
-    DropDown& fg(uint32_t c) {
-        options.fgColor = c;
-        options.hasFg = true;
-        rebuild();
-        return *this;
-    }
-
-    DropDown& font(int px) {
-        options.ttfPath.clear();
-        options.fontPx = px;
-        rebuild();
-        return *this;
-    }
-
-    DropDown& ttf(const char* path, int px) {
-        options.ttfPath = path;
-        options.fontPx = px;
-        rebuild();
-        return *this;
+    DropDownView& itemHeight(int h) {
+        e_->options.itemHeightPx = h; return *this;
     }
 
     // grid 单元之间的间距,按 Dropdown 宽度的百分比计算
-    DropDown& gapPct(int pct) {
-        dropOpts_.gapPct_ = pct; rebuild(); return *this;
+    DropDownView& gapPct(int pct) {
+        dropOpts_.gapPct_ = pct; return *this;
     }
 
     // grid 内容与边界之间的外边距,按 Dropdown 宽度的百分比计算
-    DropDown& marginPct(int pct) {
-        dropOpts_.marginPct_ = pct; rebuild(); return *this;
+    DropDownView& marginPct(int pct) {
+        dropOpts_.marginPct_ = pct; return *this;
     }
 
-    // 下拉菜单在父容器中右对齐(依赖 Element 的 hAlign)
-    DropDown& alignRight() {
-        options.hAlign = elements::HAlignEnd;
-        rebuild();
-        return *this;
+    Element build() const override {
+        if (!expanded_->get()) {
+            // 收起状态:高度为 0 的透明容器,不占用布局空间
+            Element collapsed;
+            collapsed.kind = Element::Column;
+            collapsed.options.spacingPx = 0;
+            collapsed.options.height = 0;
+            collapsed.options.hasBg = false;
+            return collapsed;
+        }
+
+        Element root = buildWithLayout_();
+        const int totalRows = computeLayoutRows_(layout_);
+        const int totalHeight = totalRows * e_->options.itemHeightPx;
+        root.options.width = e_->options.width;
+        root.options.height = totalHeight;
+        return root;
     }
 
 private:
@@ -168,19 +146,16 @@ private:
 
     void initDefaults_() {
         customLayout_ = false;
-        // 默认样式通过 Element::options 统一保存
-        options.width = 240;
-        options.itemHeightPx = 48;
-        options.bgColor = 0x26303B;
-        options.hasBg = true;
-        options.fgColor = 0xFFFFFF;
-        options.hasFg = true;
-        options.fontPx = 16;
+        e_->options.width = 240;
+        e_->options.itemHeightPx = 48;
+        e_->options.bgColor = 0x26303B;
+        e_->options.hasBg = true;
+        e_->options.fgColor = 0xFFFFFF;
+        e_->options.hasFg = true;
+        e_->options.fontPx = 16;
         ensureDefaultLayout_();
-        rebuild();
     }
 
-    // 仅在用户未自定义 layout 时根据 items 重建默认布局
     void ensureDefaultLayout_() {
         if (customLayout_) return;
         int buttonCount = 0;
@@ -201,28 +176,27 @@ private:
     }
 
     Element makeButton_(const DropDownItem& item) const {
-        // 下拉菜单按钮默认:灰色背景、白色文字、圆角、按下蓝色背景
-        Element btn = skiff::Button(item.label, item.onTap)
+        ElementView btn = skiff::Button(item.label, item.onTap)
             .bg(0x808080)
             .fg(0xFFFFFF)
             .radius(12)
             .centered()
             .applyOptions(elements::state::pressed(),
                           elements::attrOptions().bg(0x007AFF));
-        if (!options.ttfPath.empty()) btn = btn.ttf(options.ttfPath.c_str(), options.fontPx);
-        else btn = btn.font(options.fontPx);
-        return btn;
+        if (!e_->options.ttfPath.empty()) btn.ttf(e_->options.ttfPath.c_str(), e_->options.fontPx);
+        else btn.font(e_->options.fontPx);
+        return btn.build();
     }
 
     Element makeSliderRow_(const DropDownItem& item) const {
         State<int>& st = *item.sliderState;
         std::function<void(int)> sliderCb = item.onValueChange;
-        Element label = skiff::Text(item.label).fg(options.fgColor);
-        if (!options.ttfPath.empty()) label = label.ttf(options.ttfPath.c_str(), options.fontPx);
-        else label = label.font(options.fontPx);
+        ElementView label = skiff::Text(item.label).fg(e_->options.fgColor);
+        if (!e_->options.ttfPath.empty()) label.ttf(e_->options.ttfPath.c_str(), e_->options.fontPx);
+        else label.font(e_->options.fontPx);
 
         return skiff::HStack({
-                label,
+                label.build(),
                 skiff::Spacer(),
                 skiff::Slider(st.get(), item.min, item.max,
                               [&st, sliderCb](int v) {
@@ -233,11 +207,11 @@ private:
             }, 8)
             .sizePct(100, 100)
             .padLeft(12).padRight(12).padBottom(12)
-            .bg(options.bgColor)
-            .centered();
+            .bg(e_->options.bgColor)
+            .centered()
+            .build();
     }
 
-    // 收集 layout 树中的所有叶子 grid
     void collectLeafGrids_(const skiff::layout::LayoutItem& item,
                            std::vector<const skiff::layout::LayoutItem*>& out) const {
         if (item.kind == skiff::layout::LayoutItem::Grid) {
@@ -249,23 +223,24 @@ private:
         }
     }
 
-    // 根据 grid 行列数把 items 排成网格,每个单元占 (100/cols)% 宽度、100% 高度
     Element buildGridContent_(const skiff::layout::LayoutItem& grid,
                               const std::vector<Element>& items) const {
-        const int gap = options.width * dropOpts_.gapPct_ / 100;
-        const int margin = options.width * dropOpts_.marginPct_ / 100;
-        Element col = VStack({}, gap).pad(margin);
+        const int gap = e_->options.width * dropOpts_.gapPct_ / 100;
+        const int margin = e_->options.width * dropOpts_.marginPct_ / 100;
+        Element col = skiff::VStack({}, gap).pad(margin).build();
         int idx = 0;
         const int cellWPct = grid.cols > 0 ? (100 / grid.cols) : 100;
         const int rowHPct = grid.rows > 0 ? (100 / grid.rows) : 100;
         for (int r = 0; r < grid.rows; ++r) {
-            Element row = HStack({}, gap).sizePct(100, rowHPct);
+            Element row = skiff::HStack({}, gap).sizePct(100, rowHPct).build();
             for (int c = 0; c < grid.cols; ++c) {
                 if (idx < (int)items.size()) {
-                    row.children.push_back(
-                        items[idx++].sizePct(cellWPct, 100));
+                    Element cell = items[idx++];
+                    cell.options.widthPct = cellWPct;
+                    cell.options.heightPct = 100;
+                    row.children.push_back(cell);
                 } else {
-                    row.children.push_back(skiff::Spacer());
+                    row.children.push_back(skiff::Spacer().build());
                 }
             }
             if (!row.children.empty()) {
@@ -275,7 +250,6 @@ private:
         return col;
     }
 
-    // 估算 layout 展开后占用的总行数(hstack 取最大,vstack 取和)
     int computeLayoutRows_(const skiff::layout::LayoutItem& item) const {
         if (item.kind == skiff::layout::LayoutItem::Grid) return item.rows;
         if (item.kind == skiff::layout::LayoutItem::HStack) {
@@ -296,7 +270,6 @@ private:
         return 0;
     }
 
-    // 递归把 layout 描述转换成 Element 树
     Element buildLayoutTree_(const skiff::layout::LayoutItem& item,
                              const std::vector<Element>& gridContents,
                              size_t& gridIdx) const {
@@ -306,18 +279,16 @@ private:
             if (gridIdx < gridContents.size()) {
                 return gridContents[gridIdx++];
             }
-            return VStack({});
+            return skiff::VStack({}).build();
         }
 
         if (item.kind == LayoutItem::Spacer) {
-            return skiff::Spacer();
+            return skiff::Spacer().build();
         }
 
-        Element container = (item.kind == LayoutItem::HStack)
-                                ? HStack({})
-                                : VStack({});
+        Element container;
+        container.kind = (item.kind == LayoutItem::HStack) ? Element::Row : Element::Column;
 
-        // 计算主轴方向总权重
         int total = 0;
         for (size_t i = 0; i < item.children.size(); ++i) {
             const LayoutItem& child = item.children[i];
@@ -334,9 +305,11 @@ private:
                                 ? child.widthPct : child.heightPct);
                 int pct = main * 100 / total;
                 if (item.kind == LayoutItem::HStack) {
-                    childEl = childEl.sizePct(pct, child.heightPct);
+                    childEl.options.widthPct = pct;
+                    childEl.options.heightPct = child.heightPct;
                 } else {
-                    childEl = childEl.sizePct(child.widthPct, pct);
+                    childEl.options.widthPct = child.widthPct;
+                    childEl.options.heightPct = pct;
                 }
             }
             container.children.push_back(childEl);
@@ -350,7 +323,6 @@ private:
         std::vector<const LayoutItem*> leafGrids;
         collectLeafGrids_(layout_, leafGrids);
 
-        // 把条目按类型分开
         std::vector<Element> buttons;
         std::vector<Element> sliders;
         for (size_t i = 0; i < items_.size(); ++i) {
@@ -361,7 +333,6 @@ private:
             }
         }
 
-        // 叶子 grid 按顺序填充:第 0 个放按钮,第 1 个放滑条,其余留空
         std::vector<Element> gridContents;
         for (size_t i = 0; i < leafGrids.size(); ++i) {
             if (i == 0) {
@@ -377,30 +348,16 @@ private:
         size_t gridIdx = 0;
         return buildLayoutTree_(layout_, gridContents, gridIdx);
     }
-
-    void rebuild() {
-        if (!expanded_->get()) {
-            // 收起状态:高度为 0 的透明容器,不占用布局空间
-            kind = Column;
-            options.spacingPx = 0;
-            options.height = 0;
-            options.hasBg = false;
-            children.clear();
-            return;
-        }
-
-        Element root = buildWithLayout_();
-        const int totalRows = computeLayoutRows_(layout_);
-        const int totalHeight = totalRows * options.itemHeightPx;
-
-        // 保存 options,因为赋值 root 会覆盖它
-        const elements::attrOptions savedOptions = options;
-        static_cast<Element&>(*this) = root.size(options.width, totalHeight);
-        options = savedOptions;
-        options.height = totalHeight;
-        options.hasBg = true;
-    }
 };
+
+// 兼容旧写法的工厂函数
+inline DropDownView DropDown(const std::vector<DropDownItem>& items, State<bool>& expanded) {
+    return DropDownView(items, expanded);
+}
+
+inline DropDownView DropDown(State<bool>& expanded) {
+    return DropDownView(expanded);
+}
 
 } // namespace components
 } // namespace skiff

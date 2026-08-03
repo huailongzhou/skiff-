@@ -121,7 +121,7 @@ void musicMonitorLoop(skiff::Platform* platform, std::atomic<bool>* running) {
 
 // afplay 回退:SDL 音频打不开时用系统命令行播放
 void fallbackAfplay(const std::string& path) {
-    std::string cmd = "afplay -q \"" + path + "\" &";
+    std::string cmd = "afplay \"" + path + "\" >/dev/null 2>&1 &";
     std::system(cmd.c_str());
 }
 

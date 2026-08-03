@@ -99,6 +99,9 @@ struct attrOptions {
     bool hasBg;
     uint32_t fgColor;               // 前景/文字色
     bool hasFg;
+    uint32_t borderBottomColor;     // 下边框颜色
+    bool hasBorderBottom;
+    int borderBottomWidth;          // 下边框宽度(px)
     int fontPx;                     // 字号
     std::string ttfPath;            // TTF 字体路径
     int itemHeightPx;               // 列表/网格单项高度(px)
@@ -118,6 +121,7 @@ struct attrOptions {
         : width(0), height(0), widthPct(0), heightPct(0), paddingPx(0),
           paddingTop(0), paddingBottom(0), paddingLeft(0), paddingRight(0),
           bgColor(0), hasBg(false), fgColor(0), hasFg(false),
+          borderBottomColor(0), hasBorderBottom(false), borderBottomWidth(0),
           fontPx(0), itemHeightPx(0), center(false), flexGrow(false), isFloating(false),
           radiusPx(0), hasRadiusPx(false), spacingPx(0),
           animation(None), scrollDir(ScrollNone), scrollSnap(SnapNone),
@@ -138,6 +142,10 @@ struct attrOptions {
 
     attrOptions& fg(uint32_t rgb) {
         fgColor = rgb; hasFg = true; return *this;
+    }
+
+    attrOptions& borderBottom(uint32_t rgb, int widthPx = 1) {
+        borderBottomColor = rgb; hasBorderBottom = true; borderBottomWidth = widthPx; return *this;
     }
 
     attrOptions& font(int px) {
@@ -222,6 +230,9 @@ struct attrOptions {
                paddingRight == other.paddingRight &&
                bgColor == other.bgColor && hasBg == other.hasBg &&
                fgColor == other.fgColor && hasFg == other.hasFg &&
+               borderBottomColor == other.borderBottomColor &&
+               hasBorderBottom == other.hasBorderBottom &&
+               borderBottomWidth == other.borderBottomWidth &&
                fontPx == other.fontPx && ttfPath == other.ttfPath &&
                itemHeightPx == other.itemHeightPx &&
                center == other.center && flexGrow == other.flexGrow &&
