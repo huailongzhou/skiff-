@@ -155,7 +155,9 @@ private:
     }
 
     void rebuild() {
-        const int active = tab_->get();
+        if (items_.empty()) return;  // 防御:空页签列表时无内容可构建
+        int active = tab_->get();
+        if (active < 0 || active >= (int)items_.size()) active = 0;
         const int height = options.height > 0 ? options.height : 432;
 
         // 左侧页签栏
@@ -170,17 +172,33 @@ private:
             if (!tabOpts_.ttfPath_.empty()) btn = btn.ttf(tabOpts_.ttfPath_.c_str(), tabOpts_.fontPx_);
             else if (tabOpts_.fontPx_ > 0)  btn = btn.font(tabOpts_.fontPx_);
 
-            // 应用背景色选项
+            // 应用背景色选项(与输入顺序解耦,状态优先级:selected/unselected > Default)
+            // 注意:Default 状态必须用 .bg() 合并,不能走 applyOptions ——
+            // applyOptions 对 Default 是整体赋值 options,会清掉上面
+            // 已设置的 size/fg/ttf/center 等属性。
+            // 阶段1:Default 兜底(对全部按钮)
+            for (const auto& opt : bgOptions_) {
+                if (opt.p.t != tabview::part::first) continue;
+                if (opt.st.value == elements::state::Default) {
+                    btn = btn.bg(opt.color);
+                }
+            }
+            // 阶段2:选中/未选中覆盖 Default(与条目顺序无关)
             for (const auto& opt : bgOptions_) {
                 if (opt.p.t != tabview::part::first) continue;
                 if (isSelected(opt.st) && i == active) {
                     btn = btn.bg(opt.color);
                 } else if (isUnselected(opt.st) && i != active) {
                     btn = btn.bg(opt.color);
-                } else if (!isSelected(opt.st) && !isUnselected(opt.st)) {
-                    btn.applyOptions(opt.st,
-                        elements::attrOptions().bg(opt.color));
                 }
+            }
+            // 阶段3:其余交互状态(pressed 等)写入 stateStyles,由后端按状态位覆盖
+            for (const auto& opt : bgOptions_) {
+                if (opt.p.t != tabview::part::first) continue;
+                if (opt.st.value == elements::state::Default ||
+                    isSelected(opt.st) || isUnselected(opt.st)) continue;
+                btn.applyOptions(opt.st,
+                    elements::attrOptions().bg(opt.color));
             }
 
             // 应用一级菜单各状态样式
@@ -197,7 +215,6 @@ private:
 
         // 右侧内容区
         int cur = active;
-        if (cur < 0 || cur >= (int)items_.size()) cur = 0;
         Element content = items_[cur].content;
         content = content.key(std::to_string(cur).c_str());
         if (tabOpts_.slideIn_) content = content.slideInRight();

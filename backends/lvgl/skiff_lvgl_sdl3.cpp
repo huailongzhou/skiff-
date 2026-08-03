@@ -4,6 +4,7 @@
 
 #include "skiff/backend.hpp"
 #include "skiff/input.hpp"
+#include "skiff/platform.hpp"
 
 namespace skiff {
 namespace lvgl {
@@ -113,9 +114,10 @@ bool sdl3Pump() {
     return running;
 }
 
-void run(skiff::App& app) {
+void run(skiff::App& app, skiff::Platform* platform) {
     app.start();
     while (sdl3Pump()) {
+        if (platform) platform->pumpEvents();
         lv_timer_handler();
         app.update();
     }

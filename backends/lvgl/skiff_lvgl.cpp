@@ -74,6 +74,11 @@ void applyScroll(lv_obj_t* obj, ScrollDir dir, ScrollSnap snap) {
     }
 }
 
+// 页签标题:优先 Tab() 设置的 tabTitle,兼容直接把标题写进 text 的旧写法
+const std::string& tabTitleOf(const Element& e) {
+    return e.tabTitle.empty() ? e.text : e.tabTitle;
+}
+
 // 按字号挑内置字体;CJK 内置字体只有 16px。
 const lv_font_t* pickFont(int px, bool cjk) {
     if (cjk) return &lv_font_simsun_16_cjk;
@@ -481,7 +486,7 @@ lv_obj_t* LvglBackend::buildNode(const Element& e, lv_obj_t* parent,
         // 每个 child 是一个页签:text 为标题,内容构建在该页签的 page 里
         // (记录在 tabPages 中,待 out 初始化后再递归构建)
         for (size_t i = 0; i < e.children.size(); ++i) {
-            lv_obj_t* page = lv_tabview_add_tab(obj, e.children[i].text.c_str());
+            lv_obj_t* page = lv_tabview_add_tab(obj, tabTitleOf(e.children[i]).c_str());
             clearCard(page);  // 去掉默认主题的白底卡片样式,让页面底色透出来
             tabPages.push_back(page);
         }
@@ -536,7 +541,8 @@ void LvglBackend::updateNode(MountedNode& old, const Element& newE) {
             tabStructureChanged = true;
         } else {
             for (size_t i = 0; i < newE.children.size(); ++i) {
-                if (old.element.children[i].text != newE.children[i].text) {
+                if (tabTitleOf(old.element.children[i]) !=
+                    tabTitleOf(newE.children[i])) {
                     tabStructureChanged = true;
                     break;
                 }

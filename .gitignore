@@ -2,3 +2,5 @@ build/
 .DS_Store
 *.user
 *.orig
+build-win/
+assets/music/02_智创03 我将永远爱你.wav

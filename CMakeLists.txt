@@ -9,6 +9,10 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 add_library(skiff INTERFACE)
 target_include_directories(skiff INTERFACE ${CMAKE_CURRENT_SOURCE_DIR}/include)
 
+# ---------- 测试(核心逻辑,纯头文件,无需后端) ----------
+enable_testing()
+add_subdirectory(tests)
+
 # ---------- LVGL 8 后端(可选,-DSKIFF_BACKEND_LVGL=OFF 可关闭) ----------
 option(SKIFF_BACKEND_LVGL "Build the LVGL 8 backend" ON)
 
@@ -56,7 +60,7 @@ if(SKIFF_BACKEND_LVGL)
         target_link_libraries(counter_sdl PRIVATE skiff_lvgl_sdl3)
 
         # pnd_sdl.cpp 现在是平台无关的 UI 定义,没有 main,
-        # macOS 入口在 platforms/mac/mac_platform.cpp 中。
+        # 平台入口在 platforms/<平台>/ 下。
         if(APPLE)
             add_executable(pnd_mac platforms/mac/mac_platform.cpp)
             target_include_directories(pnd_mac PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
@@ -64,6 +68,16 @@ if(SKIFF_BACKEND_LVGL)
             target_link_libraries(pnd_mac PRIVATE
                 "/System/Library/PrivateFrameworks/DisplayServices.framework"
                 "-framework CoreGraphics")
+        endif()
+        if(WIN32)
+            add_executable(pnd_win platforms/win/win_platform.cpp)
+            target_include_directories(pnd_win PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+            target_link_libraries(pnd_win PRIVATE skiff_lvgl_sdl3 winmm)
+        endif()
+        if(UNIX AND NOT APPLE)
+            add_executable(pnd_linux platforms/linux/linux_platform.cpp)
+            target_include_directories(pnd_linux PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+            target_link_libraries(pnd_linux PRIVATE skiff_lvgl_sdl3)
         endif()
     endif()
 endif()

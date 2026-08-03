@@ -11,13 +11,17 @@
 
 ```
 include/skiff/          核心:Element / State / App / Backend 接口
-include/skiff/components/ 组合组件(纯 DSL):TabView(页签菜单 + 内容区)、TopNav(顶部导航条)、PageView/StateView(页面 + 页面状态管理)、Router(按名字管理页面路由)
+include/skiff/components/ 组合组件(纯 DSL):TabView(页签菜单 + 内容区)、TopNav(顶部导航条)、PageView/StateView(页面 + 页面状态管理)、Router(按名字管理页面路由)、AppUi(应用 UI 基类:platform/router/states)
 backends/lvgl/          LVGL 后端 + SDL3 宿主 + headless 显示器
 examples/               示例
   counter           无头冒烟测试
   counter_sdl       SDL3 窗口:计数器
-  pnd_sdl           SDL3 窗口:车机 PND 主页
+  pnd_sdl           平台无关的车机 PND UI 定义(无 main,被平台入口包含)
   freetype_check    FreeType / 字体覆盖检查
+platforms/              平台入口(挂载 PND UI + 注册平台能力)
+  mac/              pnd_mac(macOS:afplay 音乐 / DisplayServices 亮度)
+  win/              pnd_win(Windows:winmm 音乐 / WMI 亮度,含 MinGW 交叉工具链)
+  linux/            pnd_linux(Linux:aplay 音乐 / sysfs 背光)
 third_party/            vendored 依赖
   lvgl(8.4) / SDL3(3.2.14) / freetype(2.13.2)
 assets/fonts/           示例用字体(仅预览)
@@ -37,8 +41,15 @@ cmake --build build -j
 ```bash
 ./build/counter          # 无头冒烟:状态 → 重建链路
 ./build/counter_sdl      # SDL3 窗口:计数器
-./build/pnd_sdl          # SDL3 窗口:车机 PND 主页
+./build/pnd_linux        # SDL3 窗口:车机 PND 主页(Linux 平台入口)
 ./build/freetype_check   # FreeType 字体加载与字形覆盖检查
+```
+
+Windows 交叉编译(Linux 宿主机 + MinGW-w64):
+
+```bash
+cmake -S . -B build-win -DCMAKE_TOOLCHAIN_FILE=platforms/win/mingw-w64-x86_64.cmake
+cmake --build build-win --target pnd_win -j   # 产出 build-win/pnd_win.exe
 ```
 
 ## 页面长这样

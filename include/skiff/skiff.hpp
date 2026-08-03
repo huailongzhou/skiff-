@@ -15,3 +15,4 @@
 #include "components/drop_down.hpp"
 #include "components/page_view.hpp"
 #include "components/router.hpp"
+#include "components/app_ui.hpp"

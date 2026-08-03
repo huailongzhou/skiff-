@@ -2,6 +2,7 @@
 //
 // 本文件只描述 UI,不感知具体后端(LVGL/SDL3)或运行平台。
 // 平台相关入口(如 macOS)在 platforms/mac/mac_platform.cpp 中实现。
+#include <cstdlib>
 #include <ctime>
 #include <string>
 
@@ -24,6 +25,9 @@ const char* const ICON_WIFI  = "\xEF\x87\xAB";
 const char* const ICON_BT    = "\xEF\x8A\x93";
 const char* const ICON_BATT  = "\xEF\x89\x81";
 const char* const ICON_APPS  = "\xEF\x80\x89";  // FontAwesome th-large
+const char* const ICON_PREV  = "\xEF\x81\x88";  // FontAwesome step-backward
+const char* const ICON_PAUSE = "\xEF\x81\x8C";  // FontAwesome pause
+const char* const ICON_NEXT  = "\xEF\x81\x91";  // FontAwesome step-forward
 
 // ---- 配色 ----
 const uint32_t kBg    = 0x0F141A;  // 页面底色(深蓝黑)
@@ -192,121 +196,134 @@ Element systemSubmenu() {
 namespace skiff {
 namespace demo {
 
-// PND 风格主页的 UI 封装:持有路由和全局状态,提供 render() 供 App 使用。
-class PndUi {
+// PND 风格主页的 UI:继承 AppUi 获得 platform/router/states 能力,
+// 这里只写 PND 特有的部分(能力声明、事件订阅、页面与下拉菜单)。
+class PndUi : public components::AppUi {
 public:
     explicit PndUi(Platform& platform)
-        : platform_(platform),
-          router_("home"),
-          menuExpanded_(false),
-          brightness_(80),
-          musicPlaying_(false),
-          musicProgress_(0) {
+        : components::AppUi(platform, "home") {
+        // 注册全局状态(由 StateView 持有,bindAll 一次性绑定)
+        globalStatesInit(skiff::components::state::BOOL, {
+            {"menuExpanded", false},
+            {"musicPlaying", false},
+        });
+        globalStatesInit(skiff::components::state::INT, {
+            {"brightness", 80},
+            {"musicProgress", 0},
+        });
         // 声明需要的平台能力,具体实现由平台入口注册
         platform.declare("setBrightness");
         platform.declare("playMusic");
         platform.declare("stopMusic");
+        // 订阅平台事件(平台 → UI 上报,如播放进度)
+        platform.on("musicProgress", [this](const std::vector<std::string>& args) {
+            if (!args.empty()) {
+                states().get<int>("musicProgress").set(std::atoi(args[0].c_str()));
+            }
+        });
+        platform.on("musicEnded", [this](const std::vector<std::string>&) {
+            states().get<bool>("musicPlaying").set(false);
+            states().get<int>("musicProgress").set(0);
+        });
         setupPages_();
         setupOverlay_(platform);
     }
 
-    Element render() { return router_.render(); }
-
     void toggleMenu() {
-        menuExpanded_.set(!menuExpanded_.get());
-    }
-
-    void bind(App& app) {
-        app.bind(menuExpanded_);
-        app.bind(brightness_);
-        router_.bind(app);
+        State<bool>& e = states().get<bool>("menuExpanded");
+        e.set(!e.get());
     }
 
 private:
-    Platform& platform_;
-    components::Router router_;
-    State<bool> menuExpanded_;
-    State<int> brightness_;
-    State<bool> musicPlaying_;
-    State<int> musicProgress_;
-
     void setupPages_() {
         auto musicBody = [this](components::StateView&) -> Element {
-            const std::string track = "assets/music/sample.wav";
-            Element title = skiff::Text("音乐播放器")
-                .ttf(kFont, 28).fg(kHi);
-            Element trackName = skiff::Text(track)
-                .ttf(kFont, 16).fg(kLo);
-            Element status = skiff::Text(musicPlaying_.get() ? "正在播放" : "已停止")
-                .ttf(kFont, 20).fg(musicPlaying_.get() ? kMusic : kLo);
+            const std::string track = "assets/music/02_智创03 我将永远爱你.wav";
+            State<bool>& musicPlaying_ = states().get<bool>("musicPlaying");
+            State<int>& musicProgress_ = states().get<int>("musicProgress");
+            const bool playing = musicPlaying_.get();
 
+            // 封面
+            Element album = skiff::VStack({
+                skiff::Text(ICON_AUDIO).font(56).fg(kHi),
+            }).size(150, 150).bg(kMusic).centered();
+
+            // 曲目信息 + 播放状态
+            Element trackInfo = skiff::VStack({
+                skiff::Text("sample").ttf(kFont, 22).fg(kHi),
+                skiff::Text(track).ttf(kFont, 12).fg(kLo),
+                skiff::Text(playing ? "正在播放" : "已停止")
+                    .ttf(kFont, 14).fg(playing ? kMusic : kLo),
+            }, 4).centered();
+
+            // 控制按钮:快退 / 播放暂停 / 快进(快退快进演示进度 ±10)
             Element controls = skiff::HStack({
-                skiff::Button(musicPlaying_.get() ? "暂停" : "播放",
-                              [this, track] {
+                skiff::Button({skiff::Text(ICON_PREV).font(24).fg(kLo)},
+                              [this, &musicProgress_] { const int v = musicProgress_.get();
+                                       musicProgress_.set(v > 10 ? v - 10 : 0); })
+                    .size(56, 56).bg(kTile),
+                skiff::Button({skiff::Text(playing ? ICON_PAUSE : ICON_PLAY)
+                                   .font(28).fg(kHi)},
+                              [this, track, &musicPlaying_] {
                                   if (musicPlaying_.get()) {
-                                      platform_.invokeExternal("stopMusic", {});
+                                      platform().invokeExternal("stopMusic", {});
                                       musicPlaying_.set(false);
                                   } else {
-                                      platform_.invokeExternal("playMusic", {track});
+                                      platform().invokeExternal("playMusic", {track});
                                       musicPlaying_.set(true);
                                   }
                               })
-                    .size(160, 56)
-                    .bg(musicPlaying_.get() ? kTile : kMusic)
-                    .ttf(kFont, 18)
-                    .fg(kHi),
-                skiff::Button("停止", [this] {
-                        platform_.invokeExternal("stopMusic", {});
-                        musicPlaying_.set(false);
-                        musicProgress_.set(0);
-                    })
-                    .size(120, 56)
-                    .bg(kTile)
-                    .ttf(kFont, 18)
-                    .fg(kHi),
-            }, 24);
+                    .size(80, 80).bg(kMusic),
+                skiff::Button({skiff::Text(ICON_NEXT).font(24).fg(kLo)},
+                              [this, &musicProgress_] { const int v = musicProgress_.get();
+                                       musicProgress_.set(v < 90 ? v + 10 : 100); })
+                    .size(56, 56).bg(kTile),
+            }, 32).centered();
 
-            Element progress = skiff::Slider(musicProgress_.get(), 0, 100,
-                [this](int v) { musicProgress_.set(v); })
-                .size(400, 24);
+            // 进度条 + 百分比
+            Element progressRow = skiff::HStack({
+                skiff::Slider(musicProgress_.get(), 0, 100,
+                              [this, &musicProgress_](int v) { musicProgress_.set(v); })
+                    .size(440, 20),
+                skiff::Text(std::to_string(musicProgress_.get()) + "%")
+                    .ttf(kFont, 14).fg(kLo).size(40, 20),
+            }, 12).centered();
 
             return skiff::VStack({
                 skiff::components::TopNav({
-                    skiff::components::TopNav::routerHome(router_).ttf(kFont, 16),
-                    skiff::components::TopNav::routerPrev(router_).ttf(kFont, 16),
+                    skiff::components::TopNav::routerHome(router()).ttf(kFont, 16),
+                    skiff::components::TopNav::routerPrev(router()).ttf(kFont, 16),
                 })
                 .title(skiff::Text("音乐").ttf(kFont, 20))
                 .size(800, 48)
                 .bg(0x1A222B),
                 skiff::Spacer(),
-                title,
-                trackName,
+                album,
                 skiff::Spacer(),
-                status,
+                trackInfo,
                 skiff::Spacer(),
                 controls,
                 skiff::Spacer(),
-                progress,
+                progressRow,
                 skiff::Spacer(),
-            }, 0).size(800, 480).bg(kBg);
+            }, 0).size(800, 480).bg(kBg).centered();
         };
 
         auto homeBody = [this](components::StateView&) -> Element {
             Element topBar = statusBar();
 
             Element mainRow = skiff::HStack({
-                bigTile(ICON_GPS, "导航", 510, 300, kNavi, router_),
+                bigTile(ICON_GPS, "导航", 510, 300, kNavi, router()),
                 skiff::VStack({
-                    bigTile(ICON_PLAY, "音乐", 256, 145, kMusic, router_),
-                    bigTile(ICON_CALL, "蓝牙电话", 256, 145, kPhone, router_),
+                    bigTile(ICON_PLAY, "音乐", 256, 145, kMusic, router()),
+                    bigTile(ICON_CALL, "蓝牙电话", 256, 145, kPhone, router()),
                 }, 10),
             }, 10);
 
             Element bottomRow = skiff::HStack({
-                smallTile(ICON_AUDIO, "收音机", 188, 86, router_),
-                smallTile(ICON_VIDEO, "多媒体", 188, 86, router_),
-                smallTile(ICON_SETUP, "设置",   188, 86, router_),
-                smallTile(ICON_APPS,  "应用",   188, 86, router_),
+                smallTile(ICON_AUDIO, "收音机", 188, 86, router()),
+                smallTile(ICON_VIDEO, "多媒体", 188, 86, router()),
+                smallTile(ICON_SETUP, "设置",   188, 86, router()),
+                smallTile(ICON_APPS,  "应用",   188, 86, router()),
             }, 8);
 
             return skiff::VStack({
@@ -320,11 +337,12 @@ private:
 
         auto settingsBody = [this](components::StateView& st) -> Element {
             State<int>& tab = st.get<int>("tab");
+            State<int>& brightness_ = states().get<int>("brightness");
 
             return skiff::VStack({
                 skiff::components::TopNav({
-                    skiff::components::TopNav::routerHome(router_).ttf(kFont, 16),
-                    skiff::components::TopNav::routerPrev(router_).ttf(kFont, 16),
+                    skiff::components::TopNav::routerHome(router()).ttf(kFont, 16),
+                    skiff::components::TopNav::routerPrev(router()).ttf(kFont, 16),
                 })
                 .size(800, 48)
                 .bg(0x1A222B),
@@ -350,32 +368,32 @@ private:
             using skiff::components::AppGrid;
 
             std::vector<AppIcon> apps = {
-                {ICON_GPS,  "导航",   [this] { router_.push("导航"); }},
-                {ICON_PLAY, "音乐",   [this] { router_.push("音乐"); }},
-                {ICON_CALL, "电话",   [this] { router_.push("电话"); }},
-                {ICON_AUDIO,"收音机", [this] { router_.push("收音机"); }},
-                {ICON_VIDEO,"多媒体", [this] { router_.push("多媒体"); }},
-                {ICON_IMAGE,"相册",   [this] { router_.push("相册"); }},
-                {ICON_SETUP,"设置",   [this] { router_.push("设置"); }},
-                {ICON_WIFI, "Wi-Fi",  [this] { router_.push("Wi-Fi"); }},
-                {ICON_BT,   "蓝牙",   [this] { router_.push("蓝牙"); }},
-                {ICON_BATT, "电量",   [this] { router_.push("电量"); }},
-                {ICON_GPS,  "地图",   [this] { router_.push("地图"); }},
-                {ICON_CALL, "通讯录", [this] { router_.push("通讯录"); }},
-                {ICON_PLAY, "视频",   [this] { router_.push("视频"); }},
-                {ICON_IMAGE,"相机",   [this] { router_.push("相机"); }},
-                {ICON_AUDIO,"录音",   [this] { router_.push("录音"); }},
-                {ICON_SETUP,"日历",   [this] { router_.push("日历"); }},
-                {ICON_WIFI, "天气",   [this] { router_.push("天气"); }},
-                {ICON_BATT, "计算器", [this] { router_.push("计算器"); }},
-                {ICON_APPS, "文件",   [this] { router_.push("文件"); }},
-                {ICON_BT,   "时钟",   [this] { router_.push("时钟"); }},
+                {ICON_GPS,  "导航",   [this] { router().push("导航"); }},
+                {ICON_PLAY, "音乐",   [this] { router().push("音乐"); }},
+                {ICON_CALL, "电话",   [this] { router().push("电话"); }},
+                {ICON_AUDIO,"收音机", [this] { router().push("收音机"); }},
+                {ICON_VIDEO,"多媒体", [this] { router().push("多媒体"); }},
+                {ICON_IMAGE,"相册",   [this] { router().push("相册"); }},
+                {ICON_SETUP,"设置",   [this] { router().push("设置"); }},
+                {ICON_WIFI, "Wi-Fi",  [this] { router().push("Wi-Fi"); }},
+                {ICON_BT,   "蓝牙",   [this] { router().push("蓝牙"); }},
+                {ICON_BATT, "电量",   [this] { router().push("电量"); }},
+                {ICON_GPS,  "地图",   [this] { router().push("地图"); }},
+                {ICON_CALL, "通讯录", [this] { router().push("通讯录"); }},
+                {ICON_PLAY, "视频",   [this] { router().push("视频"); }},
+                {ICON_IMAGE,"相机",   [this] { router().push("相机"); }},
+                {ICON_AUDIO,"录音",   [this] { router().push("录音"); }},
+                {ICON_SETUP,"日历",   [this] { router().push("日历"); }},
+                {ICON_WIFI, "天气",   [this] { router().push("天气"); }},
+                {ICON_BATT, "计算器", [this] { router().push("计算器"); }},
+                {ICON_APPS, "文件",   [this] { router().push("文件"); }},
+                {ICON_BT,   "时钟",   [this] { router().push("时钟"); }},
             };
 
             return skiff::VStack({
                 skiff::components::TopNav({
-                    skiff::components::TopNav::routerHome(router_).ttf(kFont, 16),
-                    skiff::components::TopNav::routerPrev(router_).ttf(kFont, 16),
+                    skiff::components::TopNav::routerHome(router()).ttf(kFont, 16),
+                    skiff::components::TopNav::routerPrev(router()).ttf(kFont, 16),
                 })
                 .title(skiff::Text("应用").ttf(kFont, 20))
                 .size(800, 48)
@@ -389,23 +407,27 @@ private:
             }, 0).size(800, 480).bg(kBg);
         };
 
-        router_.add("home", {}, homeBody);
-        router_.add("音乐", {}, musicBody);
-        router_.add("应用", {}, appGridBody);
-        router_.add("设置", {
-            skiff::components::state<int>("tab", 0),
+        router().add("home", {}, homeBody);
+        router().add("音乐", {}, musicBody);
+        router().add("应用", {}, appGridBody);
+        router().add("设置", {
+            skiff::components::state::of<int>("tab", 0),
         }, settingsBody);
-        router_.fallback([this]() -> Element { return subPage(router_); });
+        router().fallback([this]() -> Element { return subPage(router()); });
     }
 
     void setupOverlay_(Platform& platform) {
-        router_.setOverlayBuilder([this, &platform]() -> std::vector<Element> {
+        router().setOverlayBuilder([this, &platform]() -> std::vector<Element> {
+            State<bool>& menuExpanded_ = states().get<bool>("menuExpanded");
+            State<int>& brightness_ = states().get<int>("brightness");
             if (!menuExpanded_.get()) return {};
             return {
-                skiff::TapArea([this] { menuExpanded_.set(false); })
+                skiff::TapArea([this] {
+                    states().get<bool>("menuExpanded").set(false);
+                })
                     .sizePct(100, 100)
                     .floating(),
-                topMenuOverlay(menuExpanded_, brightness_, router_, platform),
+                topMenuOverlay(menuExpanded_, brightness_, router(), platform),
             };
         });
     }

@@ -34,6 +34,7 @@ struct Element {
 
     Kind kind;
     std::string text;               // Text / Button 的文字
+    std::string tabTitle;           // Tab() 的页签标题(与 content.text 分离,不覆盖内容文字)
     elements::attrOptions options;  // 默认状态(STATE_DEFAULT)下的常用样式
     // 各状态下的样式覆盖,参考 LVGL 的 state selector
     std::map<elements::state, elements::attrOptions> stateStyles;
@@ -265,9 +266,10 @@ inline Element HStack(std::vector<Element> children, int spacing = 0) {
     return e;
 }
 
-// 一个页签:title 为标题,content 为该页内容(复用 content 的 text 字段存标题)
+// 一个页签:title 为标题,content 为该页内容。
+// 标题存在独立的 tabTitle 字段,不会覆盖 content 自身的 text(如 Text 内容)。
 inline Element Tab(std::string title, Element content) {
-    content.text = std::move(title);
+    content.tabTitle = std::move(title);
     return content;
 }
 

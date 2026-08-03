@@ -7,8 +7,8 @@
 //
 // 用法(无需子类,整页代码一处写完):
 //   skiff::components::PageView settingsPage("设置", {
-//       skiff::components::stateRef("page", nav),   // 外部状态,仅注册引用
-//       skiff::components::state<int>("tab", 0),    // 本页状态,StateView 持有
+//       skiff::components::state::ref("page", nav),   // 外部状态,仅注册引用
+//       skiff::components::state::of<int>("tab", 0),  // 本页状态,StateView 持有
 //   });
 //   // App 的 body 里:
 //   settingsPage.render([](skiff::components::StateView& st) -> Element {
@@ -98,26 +98,36 @@ private:
     std::vector<std::unique_ptr<Entry> > entries_;
 };
 
-// 状态声明:配合 PageView 构造函数的 { ... } 列表使用
+// 状态声明:配合 PageView/Router 的 { ... } 状态列表使用
 struct StateDef {
     std::function<void(StateView&)> apply;
 };
 
-// 声明一个本页状态(本体由 StateView 持有)
-template <typename T>
-StateDef state(const std::string& name, const T& initial) {
-    StateDef d;
-    d.apply = [name, initial](StateView& sv) { sv.create<T>(name, initial); };
-    return d;
-}
+// 状态声明与类型标签。
+//   标签(配合 AppUi::globalStatesInit):
+//     state::BOOL / state::INT / state::STRING
+//   StateDef 工厂(配合 PageView/Router 的 { ... } 状态列表):
+//     state::of<T>("名", 初值)   本页状态,StateView 持有
+//     state::ref("名", 外部状态)  仅注册引用
+struct state {
+    enum Tag { BOOL, INT, STRING };
 
-// 声明一个外部状态引用(如全局导航状态)
-template <typename T>
-StateDef stateRef(const std::string& name, State<T>& s) {
-    StateDef d;
-    d.apply = [name, &s](StateView& sv) { sv.addRef(name, s); };
-    return d;
-}
+    // 声明一个本页状态(本体由 StateView 持有)
+    template <typename T>
+    static StateDef of(const std::string& name, const T& initial) {
+        StateDef d;
+        d.apply = [name, initial](StateView& sv) { sv.create<T>(name, initial); };
+        return d;
+    }
+
+    // 声明一个外部状态引用(如全局导航状态)
+    template <typename T>
+    static StateDef ref(const std::string& name, State<T>& s) {
+        StateDef d;
+        d.apply = [name, &s](StateView& sv) { sv.addRef(name, s); };
+        return d;
+    }
+};
 
 class PageView {
 public:

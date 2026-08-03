@@ -8,6 +8,7 @@
 
 namespace skiff {
 class App;
+class Platform;
 }
 
 namespace skiff {
@@ -21,7 +22,9 @@ bool sdl3Pump();
 
 // 运行主循环:处理 SDL 事件 + 驱动 LVGL + 刷新 App。
 // 页面代码不再直接调用 lv_timer_handler()。
-void run(skiff::App& app);
+// 传入 platform 时,每帧先派发平台事件(pumpEvents),handler 里 set State
+// 会在同一帧的 app.update() 生效。
+void run(skiff::App& app, skiff::Platform* platform = nullptr);
 
 void destroySdl3Display();
 

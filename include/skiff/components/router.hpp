@@ -5,7 +5,7 @@
 // 用法:
 //   skiff::components::Router router("home");        // 初始路由,也是主页
 //   router.add("home", {}, homeBody);
-//   router.add("设置", { state<int>("tab", 0) }, settingsBody);
+//   router.add("设置", { state::of<int>("tab", 0) }, settingsBody);
 //   // App 的 body 里:
 //   return router.render();
 //   // 启动前一次性绑定所有页面的状态:
@@ -96,7 +96,10 @@ public:
 
     // 打开指定页面并压入页面栈;当前页面进入 Suspended
     void push(const std::string& name) {
-        if (!stack_.empty() && stack_.back() == name) return;
+        // 主页是栈底常驻页,不能入栈:等价于返回主页
+        if (name == homeName_) { home(); return; }
+        // 目标已在栈中(含栈顶):作废其上的页面,不重复压栈
+        if (activateExisting(name)) return;
         suspendCurrent();
         stack_.push_back(name);
         setPageState(name, Active);
@@ -209,7 +212,10 @@ private:
 
     void suspendCurrent() {
         if (!stack_.empty()) {
-            setPageState(stack_.back(), Suspended);
+            // Dead 页保持 Dead(已销毁,回退时跳过),不因导航操作被"复活"为 Suspended
+            if (getPageState(stack_.back()) != Dead) {
+                setPageState(stack_.back(), Suspended);
+            }
         }
     }
 
@@ -219,6 +225,8 @@ private:
         const std::string& target = nav_.get();
         if (target == homeName_) {
             home();
+        } else if (activateExisting(target)) {
+            // 目标已在栈中(含栈顶):复用该页,不重复压栈
         } else {
             // 效果等价于 push
             suspendCurrent();
@@ -226,6 +234,39 @@ private:
             setPageState(target, Active);
             lastNav_ = target;
         }
+    }
+
+    // 目标已在栈中:弹出其上的所有页面,复用并激活目标,返回 true;
+    // 未在栈中返回 false。用于防止同一页面在栈中重复出现。
+    // 注意:Dead 目标(已销毁)不可激活——弹出它本身,并继续跳过下方
+    // Dead 页,回落到下方最近的存活页面(与 pop 的 Dead 跳过语义一致)。
+    bool activateExisting(const std::string& name) {
+        for (size_t i = 0; i < stack_.size(); ++i) {
+            if (stack_[i] == name) {
+                const bool deadTarget = getPageState(name) == Dead;
+                // 弹出目标之上的页面(被弹出的 Dead 页保持 Dead)
+                while (stack_.back() != name) {
+                    if (getPageState(stack_.back()) != Dead) {
+                        setPageState(stack_.back(), Suspended);
+                    }
+                    stack_.pop_back();
+                }
+                if (deadTarget) {
+                    // Dead 目标不可激活:弹出它本身,继续跳过下方 Dead 页
+                    stack_.pop_back();  // 状态保持 Dead
+                    while (stack_.size() > 1 &&
+                           getPageState(stack_.back()) == Dead) {
+                        stack_.pop_back();
+                    }
+                    if (stack_.empty()) stack_.push_back(homeName_);  // 防御:home 常驻栈底,正常不会为空
+                }
+                setPageState(stack_.back(), Active);
+                nav_.set(stack_.back());
+                lastNav_ = stack_.back();
+                return true;
+            }
+        }
+        return false;
     }
 
     State<std::string> nav_;
