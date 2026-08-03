@@ -212,6 +212,9 @@ public:
             {"musicProgress", 0},
             {"mediaCategory", 0},
         });
+        globalStatesInit(skiff::components::state::STRING, {
+            {"currentTrack", "assets/music/sample.wav"},
+        });
         // 声明需要的平台能力,具体实现由平台入口注册
         platform.declare("setBrightness");
         platform.declare("playMusic");
@@ -239,7 +242,8 @@ public:
 private:
     void setupPages_() {
         auto musicBody = [this](components::StateView&) -> Element {
-            const std::string track = "assets/music/02_智创03 我将永远爱你.wav";
+            State<std::string>& currentTrack_ = states().get<std::string>("currentTrack");
+            const std::string track = currentTrack_.get();
             State<bool>& musicPlaying_ = states().get<bool>("musicPlaying");
             State<int>& musicProgress_ = states().get<int>("musicProgress");
             const bool playing = musicPlaying_.get();
@@ -372,8 +376,11 @@ private:
                         skiff::Text(name).ttf(kFont, 14).fg(kHi),
                     }, [this, cat, path] {
                         if (cat == 1) {
-                            platform().invokeExternal("playMusic", {path});
-                            states().get<bool>("musicPlaying").set(true);
+                            states().get<std::string>("currentTrack").set(path);
+                            states().get<bool>("musicPlaying").set(false);
+                            states().get<int>("musicProgress").set(0);
+                            platform().invokeExternal("stopMusic", {});
+                            router().push("音乐");
                         } else {
                             platform().invokeExternal("openFile", {path});
                         }
