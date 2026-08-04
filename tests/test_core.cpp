@@ -375,13 +375,13 @@ static void test_apply_options_default() {
     CHECK(e.options.hasBg);
     CHECK(e.options.bgColor == 0x123456);
 
-    // 非 Default 状态写入 stateStyles,不影响 options
+    // 非 Default 状态写入 stateStyles(存于 rare),不影响 options
     skiff::Element f = skiff::Text("y").size(100, 20);
     f.applyOptions(skiff::elements::state::pressed(),
                    skiff::elements::attrOptions().bg(0x999999));
     CHECK(f.options.width == 100);
-    CHECK(f.stateStyles[skiff::elements::state::pressed()].hasBg);
-    CHECK(f.stateStyles[skiff::elements::state::pressed()].bgColor == 0x999999);
+    CHECK(f.rare->stateStyles[skiff::elements::state::pressed()].hasBg);
+    CHECK(f.rare->stateStyles[skiff::elements::state::pressed()].bgColor == 0x999999);
 }
 
 int main() {

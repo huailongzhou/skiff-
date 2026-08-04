@@ -23,6 +23,15 @@ namespace skiff {
 // 前向声明
 class ElementView;
 
+// 小众数据:仅 Slider / 带状态样式的节点才分配,Element 本体保持精简。
+struct RareData {
+    int min, max, value;                        // Slider 用
+    std::function<void(int)> onValueChange;     // Slider 值变化回调
+    // 各状态下的样式覆盖,参考 LVGL 的 state selector
+    std::map<elements::state, elements::attrOptions> stateStyles;
+    RareData() : min(0), max(100), value(0) {}
+};
+
 struct Element {
     enum Kind {
         Column,   // 纵向容器(对应 SwiftUI 的 VStack)
@@ -32,8 +41,7 @@ struct Element {
         Spacer,   // 弹性空白(对应 SwiftUI 的 Spacer)
         Slider,   // 滑条
         TabView,  // 页签容器(对应 SwiftUI 的 TabView;children 为各页内容,
-                  // 每个 child 的 text 作为该页标题,见 Tab())
-        External, // 外部回调声明:不渲染 UI,由后端/板子代码按名字执行具体功能
+                  // 每个 child 的 tabTitle 作为该页标题,见 Tab())
         TapArea,  // 透明点击区:不渲染 UI,用于捕获点击事件(如关闭浮层)
     };
 
@@ -41,32 +49,36 @@ struct Element {
     std::string text;               // Text / Button 的文字
     std::string tabTitle;           // Tab() 的页签标题(与 content.text 分离,不覆盖内容文字)
     elements::attrOptions options;  // 默认状态(STATE_DEFAULT)下的常用样式
-    // 各状态下的样式覆盖,参考 LVGL 的 state selector
-    std::map<elements::state, elements::attrOptions> stateStyles;
-    int min, max, value;            // Slider 用
-    std::function<void(int)> onValueChange; // Slider 值变化回调
     std::vector<Element> children;       // 容器的子节点 / Button 的自定义内容
     std::function<void()> onTap;         // Button 的点击回调
+    std::unique_ptr<RareData> rare;      // Slider / 状态样式节点才分配
 
-    // External 元素:声明式外部调用
-    std::string externalName;            // 外部功能名
-    std::vector<std::string> externalArgs; // 调用参数(字符串化后交给板子代码解析)
+    Element() : kind(Text), options() {}
 
-    // Button 外部点击:不感知具体实现,由后端调用 registerExternal 注册的处理器
-    std::string externalTapName;
-    std::vector<std::string> externalTapArgs;
+    // unique_ptr 不可拷贝:深拷贝 rare(没有 rare 的节点零开销)
+    Element(const Element& o)
+        : kind(o.kind), text(o.text), tabTitle(o.tabTitle), options(o.options),
+          children(o.children), onTap(o.onTap),
+          rare(o.rare ? new RareData(*o.rare) : nullptr) {}
+    Element& operator=(const Element& o) {
+        if (this != &o) {
+            kind = o.kind;
+            text = o.text;
+            tabTitle = o.tabTitle;
+            options = o.options;
+            children = o.children;
+            onTap = o.onTap;
+            rare.reset(o.rare ? new RareData(*o.rare) : nullptr);
+        }
+        return *this;
+    }
+    Element(Element&&) = default;
+    Element& operator=(Element&&) = default;
 
-    Element()
-        : kind(Text), options(), stateStyles(),
-          min(0), max(100), value(0) {}
-
-    // 声明 Button 点击时触发 external 回调(由后端 registerExternal 实现)
-    Element externalTap(const std::string& name,
-                        const std::vector<std::string>& args = {}) const {
-        Element e = *this;
-        e.externalTapName = name;
-        e.externalTapArgs = args;
-        return e;
+    // 仅 Slider / 状态样式节点使用:没有 rare 时分配
+    RareData& ensureRare() {
+        if (!rare) rare.reset(new RareData());
+        return *rare;
     }
 
     // 批量应用 attrOptions 到指定状态(参考 LVGL 的 state selector)
@@ -76,7 +88,7 @@ struct Element {
         if (s.value == elements::state::Default) {
             options = opt;
         }
-        stateStyles[s] = opt;
+        ensureRare().stateStyles[s] = opt;
         return *this;
     }
 
@@ -220,7 +232,7 @@ public:
         if (s.value == elements::state::Default) {
             e_->options = opt;
         }
-        e_->stateStyles[s] = opt;
+        e_->ensureRare().stateStyles[s] = opt;
         return *this;
     }
 
@@ -270,10 +282,11 @@ inline ElementView Slider(int value, int min, int max,
                           std::function<void(int)> onValueChange) {
     Element e;
     e.kind = Element::Slider;
-    e.value = value;
-    e.min = min;
-    e.max = max;
-    e.onValueChange = std::move(onValueChange);
+    RareData& rd = e.ensureRare();
+    rd.value = value;
+    rd.min = min;
+    rd.max = max;
+    rd.onValueChange = std::move(onValueChange);
     return ElementView(std::move(e));
 }
 
@@ -306,16 +319,6 @@ inline ElementView TabView(std::vector<Element> tabs) {
     Element e;
     e.kind = Element::TabView;
     e.children = std::move(tabs);
-    return ElementView(std::move(e));
-}
-
-// 外部回调声明:不渲染 UI,由后端/板子代码按名字实现。
-inline ElementView External(std::string name,
-                            std::vector<std::string> args = {}) {
-    Element e;
-    e.kind = Element::External;
-    e.externalName = std::move(name);
-    e.externalArgs = std::move(args);
     return ElementView(std::move(e));
 }
 

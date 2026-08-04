@@ -7,12 +7,14 @@
 #include <cstdlib>
 #include <atomic>
 #include <chrono>
+#include <cstring>
 #include <sstream>
 #include <string>
 #include <thread>
 #include <vector>
 
 #include <dirent.h>
+#include <mpg123.h>
 
 #include <SDL3/SDL.h>
 
@@ -23,7 +25,64 @@
 
 namespace {
 
-// Linux 音乐播放器:直接用 SDL3 音频播放 wav,不依赖外部命令;
+// 用 libmpg123 把 mp3 整首解码为 PCM(S16),供 SDL 音频流播放。
+// 返回 false 表示不是 mp3 或解码失败。
+bool loadMp3(const std::string& path, SDL_AudioSpec* spec,
+             Uint8** buf, Uint32* len) {
+    static bool mpgReady = false;
+    if (!mpgReady) mpgReady = (mpg123_init() == MPG123_OK);
+    if (!mpgReady) return false;
+
+    int err = 0;
+    mpg123_handle* mh = mpg123_new(nullptr, &err);
+    if (mh == nullptr) return false;
+    if (mpg123_open(mh, path.c_str()) != MPG123_OK) {
+        mpg123_delete(mh);
+        return false;
+    }
+
+    long rate = 0;
+    int channels = 0, encoding = 0;
+    if (mpg123_getformat(mh, &rate, &channels, &encoding) != MPG123_OK ||
+        encoding != MPG123_ENC_SIGNED_16) {
+        mpg123_close(mh);
+        mpg123_delete(mh);
+        return false;
+    }
+    spec->freq = (int)rate;
+    spec->channels = (Uint8)channels;
+    spec->format = SDL_AUDIO_S16LE;
+
+    std::vector<Uint8> pcm;
+    unsigned char chunk[16384];
+    size_t n = 0;
+    int r;
+    while ((r = mpg123_read(mh, chunk, sizeof(chunk), &n)) == MPG123_OK ||
+           r == MPG123_NEW_FORMAT) {
+        pcm.insert(pcm.end(), chunk, chunk + n);
+    }
+    mpg123_close(mh);
+    mpg123_delete(mh);
+    if (pcm.empty()) return false;
+
+    *len = (Uint32)pcm.size();
+    *buf = (Uint8*)SDL_malloc(*len);
+    if (*buf == nullptr) return false;
+    memcpy(*buf, pcm.data(), *len);
+    return true;
+}
+
+bool endsWithWav(const std::string& path) {
+    if (path.size() < 4) return false;
+    std::string ext = path.substr(path.size() - 4);
+    for (size_t i = 0; i < ext.size(); ++i) {
+        if (ext[i] >= 'A' && ext[i] <= 'Z') ext[i] += 'a' - 'A';
+    }
+    return ext == ".wav";
+}
+
+// Linux 音乐播放器:wav 用 SDL_LoadWAV,mp3 用 libmpg123 解码,
+// 统一走 SDL3 音频流播放,不依赖外部命令;
 // SDL 音频不可用时(无声卡/无音频服务)回退到 aplay。
 class SdlMusicPlayer {
 public:
@@ -34,9 +93,15 @@ public:
         if (!SDL_WasInit(SDL_INIT_AUDIO)) SDL_InitSubSystem(SDL_INIT_AUDIO);
 
         SDL_AudioSpec spec;
-        if (!SDL_LoadWAV(path.c_str(), &spec, &buf_, &len_)) {
-            std::printf("[LinuxPlatform] SDL_LoadWAV failed: %s\n", SDL_GetError());
-            buf_ = nullptr;
+        if (endsWithWav(path)) {
+            if (!SDL_LoadWAV(path.c_str(), &spec, &buf_, &len_)) {
+                std::printf("[LinuxPlatform] SDL_LoadWAV failed: %s\n",
+                            SDL_GetError());
+                buf_ = nullptr;
+                return false;
+            }
+        } else if (!loadMp3(path, &spec, &buf_, &len_)) {
+            std::printf("[LinuxPlatform] load mp3 failed: %s\n", path.c_str());
             return false;
         }
         stream_ = SDL_OpenAudioDeviceStream(SDL_AUDIO_DEVICE_DEFAULT_PLAYBACK,

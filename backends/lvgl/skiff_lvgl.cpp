@@ -31,10 +31,17 @@ lv_state_t toLvState(const elements::state& s) {
     return state;
 }
 
+// Element 的小众数据(无 rare 时返回共享的空实例,调用方免判空)
+const RareData& rareOf(const Element& e) {
+    static const RareData kEmpty;
+    return e.rare ? *e.rare : kEmpty;
+}
+
 // 应用 Element 上各状态覆盖的样式(目前支持 bg/fg,后续可扩展 font/size 等)
 void applyStateStyles(lv_obj_t* obj, const Element& e) {
+    if (!e.rare) return;
     for (std::map<elements::state, elements::attrOptions>::const_iterator it =
-             e.stateStyles.begin(); it != e.stateStyles.end(); ++it) {
+             e.rare->stateStyles.begin(); it != e.rare->stateStyles.end(); ++it) {
         const lv_state_t state = toLvState(it->first);
         if (it->second.hasBg) {
             lv_obj_set_style_bg_color(obj, lv_color_hex(it->second.bgColor), state);
@@ -467,14 +474,15 @@ lv_obj_t* LvglBackend::buildNode(Element e, lv_obj_t* parent,
         break;
     }
     case Element::Slider: {
+        const RareData& rd = rareOf(e);
         obj = lv_slider_create(parent);
-        lv_slider_set_range(obj, e.min, e.max);
-        lv_slider_set_value(obj, e.value, LV_ANIM_OFF);
+        lv_slider_set_range(obj, rd.min, rd.max);
+        lv_slider_set_value(obj, rd.value, LV_ANIM_OFF);
         applyStateStyles(obj, e);
         applyObjectSize(obj, e, parent);
-        if (e.onValueChange) {
+        if (rd.onValueChange) {
             MountedNode tmp;
-            std::function<void(int)> cb = e.onValueChange;
+            std::function<void(int)> cb = rd.onValueChange;
             tmp.callbacks.push_back(std::unique_ptr<std::function<void()> >(
                 new std::function<void()>([obj, cb] {
                     cb(lv_slider_get_value(obj));
@@ -483,11 +491,6 @@ lv_obj_t* LvglBackend::buildNode(Element e, lv_obj_t* parent,
                                 LV_EVENT_VALUE_CHANGED, tmp.callbacks.back().get());
             if (out) out->callbacks.push_back(std::move(tmp.callbacks.back()));
         }
-        break;
-    }
-    case Element::External: {
-        // Platform 能力由使用者在页面代码中显式调用,框架不自动处理
-        obj = nullptr;
         break;
     }
     case Element::TabView: {
@@ -567,7 +570,7 @@ void LvglBackend::updateNode(MountedNode& old, const Element& newE) {
     }
 
     if (old.element.kind != e.kind || tabStructureChanged ||
-        old.element.stateStyles != e.stateStyles ||
+        rareOf(old.element).stateStyles != rareOf(e).stateStyles ||
         old.element.options.scrollDir != e.options.scrollDir ||
         old.element.options.scrollSnap != e.options.scrollSnap ||
         (old.element.options.animation == SlideInRight) !=
@@ -575,10 +578,10 @@ void LvglBackend::updateNode(MountedNode& old, const Element& newE) {
         (old.element.options.animation == SlideInDown) !=
             (e.options.animation == SlideInDown) ||
         (!old.element.onTap && e.onTap) || (old.element.onTap && !e.onTap) ||
-        (!old.element.onValueChange && e.onValueChange) ||
-        (old.element.onValueChange && !e.onValueChange)) {
+        (!rareOf(old.element).onValueChange && rareOf(e).onValueChange) ||
+        (rareOf(old.element).onValueChange && !rareOf(e).onValueChange)) {
         // 类型/动画/回调发生变化:整子树重建
-        // External 等不可见节点 obj 可能为 nullptr,直接用父容器作为挂载点
+        // TapArea 等不可见节点 obj 可能为 nullptr,直接用父容器作为挂载点
         lv_obj_t* parent = old.obj ? lv_obj_get_parent(old.obj) : nullptr;
         clearNode(old);
         old.element = e;
@@ -597,9 +600,6 @@ void LvglBackend::updateNode(MountedNode& old, const Element& newE) {
     }
     case Element::Spacer:
         // spacer 无属性可更新
-        break;
-    case Element::External:
-        // external 已在上面 rebuild 条件中处理(参数变化时触发),这里无需操作
         break;
     case Element::TapArea:
         // TapArea 无样式/尺寸之外的属性需要更新;尺寸变化在初始条件里会触发重建
@@ -632,19 +632,21 @@ void LvglBackend::updateNode(MountedNode& old, const Element& newE) {
         break;
     }
     case Element::Slider: {
+        const RareData& oldRd = rareOf(old.element);
+        const RareData& newRd = rareOf(e);
         // 同 Button:复用节点时更新值变化回调
-        if (old.element.onValueChange && e.onValueChange &&
+        if (oldRd.onValueChange && newRd.onValueChange &&
             !old.callbacks.empty()) {
-            std::function<void(int)> cb = e.onValueChange;
+            std::function<void(int)> cb = newRd.onValueChange;
             *old.callbacks[0] = [obj, cb] {
                 cb(lv_slider_get_value(obj));
             };
         }
-        if (old.element.min != e.min || old.element.max != e.max) {
-            lv_slider_set_range(obj, e.min, e.max);
+        if (oldRd.min != newRd.min || oldRd.max != newRd.max) {
+            lv_slider_set_range(obj, newRd.min, newRd.max);
         }
-        if (old.element.value != e.value) {
-            lv_slider_set_value(obj, e.value, LV_ANIM_OFF);
+        if (oldRd.value != newRd.value) {
+            lv_slider_set_value(obj, newRd.value, LV_ANIM_OFF);
         }
         if (old.element.options.width != e.options.width || old.element.options.height != e.options.height ||
             old.element.options.widthPct != e.options.widthPct || old.element.options.heightPct != e.options.heightPct) {
