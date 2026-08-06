@@ -205,6 +205,10 @@ public:
         e_->options.keyId = k; return *this;
     }
 
+    ElementView& key(const std::string& k) {
+        e_->options.keyId = k; return *this;
+    }
+
     ElementView& scrollHorizontal() {
         e_->options.scrollDir = ScrollHorizontal; return *this;
     }

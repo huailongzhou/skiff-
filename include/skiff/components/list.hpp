@@ -98,6 +98,9 @@ public:
             row.options.height = e_->options.itemHeightPx;
             row.options.bgColor = rowBg_;
             row.options.hasBg = true;
+            if (!item.key.empty()) {
+                row.options.keyId = item.key;
+            }
 
             col.children.push_back(row);
         }

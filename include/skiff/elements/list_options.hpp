@@ -12,12 +12,16 @@ struct ListItem {
     std::string title;       // 主标题
     std::string subtitle;    // 副标题(可选)
     std::function<void()> onTap; // 点击回调
+    std::string key;         // 列表项 key,用于 diff 时稳定复用
 
     ListItem() {}
     ListItem(const std::string& t, std::function<void()> tap)
         : title(t), onTap(std::move(tap)) {}
     ListItem(const std::string& t, const std::string& sub, std::function<void()> tap)
         : title(t), subtitle(sub), onTap(std::move(tap)) {}
+    ListItem(const std::string& t, const std::string& sub, const std::string& k,
+             std::function<void()> tap)
+        : title(t), subtitle(sub), onTap(std::move(tap)), key(k) {}
 };
 
 struct listOptions {

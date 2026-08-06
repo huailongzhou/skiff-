@@ -21,6 +21,68 @@ namespace comp = skiff::components;
 
 static skiff::Element pageBody(comp::StateView&) { return skiff::Text("p"); }
 
+// 用于测试 Backend diff 算法的 Mock 后端
+class TestBackend : public skiff::Backend {
+public:
+    TestBackend() : skiff::Backend(nullptr), nextId_(1),
+                    createCount_(0), updateCount_(0),
+                    destroyCount_(0), moveCount_(0) {}
+
+    int createCount() const { return createCount_; }
+    int updateCount() const { return updateCount_; }
+    int destroyCount() const { return destroyCount_; }
+    int moveCount() const { return moveCount_; }
+    void resetCounts() {
+        createCount_ = updateCount_ = destroyCount_ = moveCount_ = 0;
+    }
+
+private:
+    void* createGraphicObject(const skiff::Element& e, void* parent,
+                              MountedNode* node) override {
+        ++createCount_;
+        (void)e; (void)parent; (void)node;
+        return reinterpret_cast<void*>(nextId_++);
+    }
+
+    void updateGraphicObject(MountedNode& node, const skiff::Element& new_e) override {
+        ++updateCount_;
+        (void)node; (void)new_e;
+    }
+
+    void destroyGraphicObject(void* obj) override {
+        ++destroyCount_;
+        (void)obj;
+    }
+
+    void* getGraphicParent(void* obj) override {
+        (void)obj;
+        return nullptr;
+    }
+
+    void moveGraphicChild(void* obj, void* parent, int index) override {
+        ++moveCount_;
+        (void)obj; (void)parent; (void)index;
+    }
+
+    void* getChildParent(void* obj, const skiff::Element& e,
+                         size_t child_index) override {
+        (void)e; (void)child_index;
+        return obj;
+    }
+
+    bool needsRebuild(const MountedNode& old, const skiff::Element& new_e) override {
+        return old.element.kind != new_e.kind;
+    }
+
+    void afterMount() override {}
+
+    int nextId_;
+    int createCount_;
+    int updateCount_;
+    int destroyCount_;
+    int moveCount_;
+};
+
 // ---- Router:栈状态机 ----
 static void test_router() {
     comp::Router r("home");
@@ -384,6 +446,140 @@ static void test_apply_options_default() {
     CHECK(f.rare->stateStyles[skiff::elements::state::pressed()].bgColor == 0x999999);
 }
 
+// ---- Backend diff:key 稳定复用,无 key 按位置/类型复用 ----
+static void test_backend_diff_key() {
+    TestBackend backend;
+
+    // 第一帧:Column 下三个 Text,分别带 key a/b/c
+    skiff::Element root1 = skiff::VStack({
+        skiff::Text("A").key("a"),
+        skiff::Text("B").key("b"),
+        skiff::Text("C").key("c"),
+    }, 0).build();
+    backend.mount(root1);
+    CHECK(backend.createCount() == 4);  // Column + 3 Text
+    CHECK(backend.updateCount() == 0);
+    backend.resetCounts();
+
+    // 第二帧:顺序打乱为 c/a/b,但 key 不变,应只移动不重建
+    skiff::Element root2 = skiff::VStack({
+        skiff::Text("C2").key("c"),
+        skiff::Text("A2").key("a"),
+        skiff::Text("B2").key("b"),
+    }, 0).build();
+    backend.mount(root2);
+    CHECK(backend.createCount() == 0);  // 无新建
+    CHECK(backend.destroyCount() == 0); // 无删除
+    CHECK(backend.updateCount() == 4);  // Column + 三个 Text 更新
+    CHECK(backend.moveCount() == 3);    // 三个子节点都 move_to_index
+}
+
+// ---- Backend diff:无 key 时按位置复用,顺序打乱会重建 ----
+static void test_backend_diff_no_key() {
+    TestBackend backend;
+
+    skiff::Element root1 = skiff::VStack({
+        skiff::Text("A"),
+        skiff::Text("B"),
+        skiff::Text("C"),
+    }, 0).build();
+    backend.mount(root1);
+    backend.resetCounts();
+
+    // 无 key 打乱顺序:按同位置同类型匹配,节点被复用并更新文本/移动位置
+    skiff::Element root2 = skiff::VStack({
+        skiff::Text("C"),
+        skiff::Text("A"),
+        skiff::Text("B"),
+    }, 0).build();
+    backend.mount(root2);
+    CHECK(backend.createCount() == 0);  // 无新建
+    CHECK(backend.destroyCount() == 0); // 无删除
+    CHECK(backend.updateCount() == 4);  // Column + 三个 Text 更新文本
+    CHECK(backend.moveCount() == 3);    // 三个子节点都 move_to_index
+}
+
+// ---- MemoView:相同 key 复用缓存,不同 key 或 invalidate 重新 build ----
+static void test_memo_view() {
+    int buildCount = 0;
+    comp::MemoView view("v1", [&buildCount]() {
+        ++buildCount;
+        return skiff::Text("x");
+    });
+
+    skiff::Element e1 = view.build();
+    CHECK(buildCount == 1);
+    skiff::Element e2 = view.build();
+    CHECK(buildCount == 1);  // 同 key 不复建
+    CHECK(e1.text == e2.text);
+
+    view.reset("v2", [&buildCount]() {
+        ++buildCount;
+        return skiff::Text("y");
+    });
+    skiff::Element e3 = view.build();
+    CHECK(buildCount == 2);
+    CHECK(e3.text == "y");
+
+    view.invalidate();
+    skiff::Element e4 = view.build();
+    CHECK(buildCount == 3);  // invalidate 后强制重建
+}
+
+// ---- Backend diff:TapArea onTap 变化时节点复用,回调被就地替换 ----
+static void test_backend_diff_taparea_callback() {
+    TestBackend backend;
+
+    int callA = 0;
+    int callB = 0;
+    skiff::Element root1 = skiff::VStack({
+        skiff::TapArea([&callA] { ++callA; }),
+    }, 0).build();
+    backend.mount(root1);
+    backend.resetCounts();
+
+    // onTap 从 A 换成 B,kind 不变,应走 updateGraphicObject 而不是重建
+    skiff::Element root2 = skiff::VStack({
+        skiff::TapArea([&callB] { ++callB; }),
+    }, 0).build();
+    backend.mount(root2);
+    CHECK(backend.createCount() == 0);
+    CHECK(backend.destroyCount() == 0);
+    // VStack 父节点 + TapArea 子节点各一次 updateGraphicObject
+    CHECK(backend.updateCount() == 2);
+}
+
+// ---- BindView:State 版本变化才重建子树,set 同值也会触发版本更新 ----
+static void test_bind_view() {
+    skiff::State<int> count(0);
+    int buildCount = 0;
+
+    comp::BindView<int> view(count, [&buildCount](int c) -> skiff::Element {
+        ++buildCount;
+        return skiff::Text(std::to_string(c));
+    });
+
+    skiff::Element e1 = view.build();
+    CHECK(buildCount == 1);
+    CHECK(e1.text == "0");
+
+    skiff::Element e2 = view.build();
+    CHECK(buildCount == 1);  // State 未变,复用缓存
+
+    count.set(5);
+    skiff::Element e3 = view.build();
+    CHECK(buildCount == 2);
+    CHECK(e3.text == "5");
+
+    count.set(5);  // 值相同但版本自增
+    skiff::Element e4 = view.build();
+    CHECK(buildCount == 3);  // BindView 按版本判断,会重建
+
+    view.invalidate();
+    skiff::Element e5 = view.build();
+    CHECK(buildCount == 4);
+}
+
 // ---- i18n 框架层:注册目录 / 切换语言 / 按下标查找 ----
 static void test_i18n() {
     enum { k_hi = 0, k_bye, k_count };
@@ -431,6 +627,11 @@ int main() {
     test_tabview_content_bg();
     test_tab_title();
     test_apply_options_default();
+    test_backend_diff_key();
+    test_backend_diff_no_key();
+    test_backend_diff_taparea_callback();
+    test_memo_view();
+    test_bind_view();
     test_i18n();
 
     if (failures == 0) {

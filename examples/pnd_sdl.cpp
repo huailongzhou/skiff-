@@ -5,6 +5,7 @@
 // 文案经 pnd_i18n(业务) + skiff::i18n(框架);路由使用稳定英文 ID。
 #include <cstdlib>
 #include <ctime>
+#include <memory>
 #include <string>
 
 #include "skiff/skiff.hpp"
@@ -145,28 +146,28 @@ Element settingsRow(const std::string& label, const std::string& value) {
     }, 0).size(560, 48).centered();
 }
 
-Element languageRow(State<std::string>& locale) {
-    const bool isEn = locale.get() == "en";
+Element languageRow(const std::string& locale, State<std::string>& localeState) {
+    const bool isEn = locale == "en";
     const std::string next = isEn ? "zh-CN" : "en";
     const std::string shown = isEn ? tr(settings_lang_en) : tr(settings_lang_zh);
     return skiff::HStack({
         skiff::Text(tr(settings_language)).ttf(kFont, 18).fg(kHi),
         skiff::Spacer(),
-        skiff::Button(shown, [&locale, next] {
+        skiff::Button(shown, [&localeState, next] {
             skiff::i18n::setLocale(next);
-            locale.set(next);
+            localeState.set(next);
         }).size(160, 36).bg(kNavi).ttf(kFont, 16).fg(kHi),
     }, 0).size(560, 48).centered();
 }
 
-Element brightnessRow(State<int>& brightness) {
+Element brightnessRow(int brightness, State<int>& brightnessState) {
     return skiff::HStack({
         skiff::Text(tr(app_brightness)).ttf(kFont, 18).fg(kHi),
         skiff::Spacer(),
-        skiff::Slider(brightness.get(), 0, 100,
-                      [&brightness](int v) { brightness.set(v); })
+        skiff::Slider(brightness, 0, 100,
+                      [&brightnessState](int v) { brightnessState.set(v); })
             .size(180, 24),
-        skiff::Text(std::to_string(brightness.get()) + "%")
+        skiff::Text(std::to_string(brightness) + "%")
             .ttf(kFont, 16).fg(kLo).size(48, 24),
     }, 12).size(560, 48).centered();
 }
@@ -181,9 +182,9 @@ Element networkSubmenu() {
     }, 0).size(560, 432).pad(20).bg(kTile);
 }
 
-Element displaySubmenu(State<int>& brightness) {
+Element displaySubmenu(int brightness, State<int>& brightnessState) {
     return skiff::VStack({
-        brightnessRow(brightness),
+        brightnessRow(brightness, brightnessState),
         settingsRow(tr(settings_auto_brightness), tr(common_on)),
         settingsRow(tr(settings_night_mode), tr(common_off)),
         settingsRow(tr(settings_resolution), "800x480"),
@@ -200,11 +201,11 @@ Element soundSubmenu() {
     }, 0).size(560, 432).pad(20).bg(kTile);
 }
 
-Element systemSubmenu(State<std::string>& locale) {
+Element systemSubmenu(const std::string& locale, State<std::string>& localeState) {
     return skiff::VStack({
         settingsRow(tr(settings_version), "v1.2.0"),
         settingsRow(tr(settings_storage), "12GB/32GB"),
-        languageRow(locale),
+        languageRow(locale, localeState),
         settingsRow(tr(settings_reset), tr(common_dash)),
         settingsRow(tr(settings_about), tr(common_dash)),
     }, 0).size(560, 432).pad(20).bg(kTile);
@@ -261,7 +262,25 @@ public:
     }
 
 private:
+    // 细粒度 State->子树绑定:这些子树只在对应 State 变化时重建
+    std::unique_ptr<skiff::components::BindView<int> > brightnessBind_;
+    std::unique_ptr<skiff::components::BindView<std::string> > localeBind_;
+
     void setupPages_() {
+        State<int>& brightnessState = states().get<int>("brightness");
+        brightnessBind_.reset(new skiff::components::BindView<int>(
+            brightnessState,
+            [this, &brightnessState](int v) -> Element {
+                return displaySubmenu(v, brightnessState);
+            }));
+
+        State<std::string>& localeState = states().get<std::string>("locale");
+        localeBind_.reset(new skiff::components::BindView<std::string>(
+            localeState,
+            [this, &localeState](const std::string& l) -> Element {
+                return systemSubmenu(l, localeState);
+            }));
+
         auto musicBody = [this](components::StateView&) -> Element {
             State<std::string>& currentTrack_ = states().get<std::string>("currentTrack");
             const std::string track = currentTrack_.get();
@@ -431,8 +450,6 @@ private:
 
         auto settingsBody = [this](components::StateView& st) -> Element {
             State<int>& tab = st.get<int>("tab");
-            State<int>& brightness_ = states().get<int>("brightness");
-            State<std::string>& locale_ = states().get<std::string>("locale");
 
             return skiff::VStack({
                 skiff::components::TopNav({
@@ -444,9 +461,9 @@ private:
                 .bg(0x1A222B),
                 skiff::components::TabView({
                     {tr(settings_network), networkSubmenu()},
-                    {tr(settings_display), displaySubmenu(brightness_)},
+                    {tr(settings_display), brightnessBind_->build()},
                     {tr(settings_sound), soundSubmenu()},
-                    {tr(settings_system), systemSubmenu(locale_)},
+                    {tr(settings_system), localeBind_->build()},
                 }, tab)
                     .as<skiff::components::TabViewView>()
                     .applyBgOption({
