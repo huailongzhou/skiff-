@@ -384,6 +384,39 @@ static void test_apply_options_default() {
     CHECK(f.rare->stateStyles[skiff::elements::state::pressed()].bgColor == 0x999999);
 }
 
+// ---- i18n 框架层:注册目录 / 切换语言 / 按下标查找 ----
+static void test_i18n() {
+    enum { k_hi = 0, k_bye, k_count };
+    static std::string zh[k_count];
+    static std::string en[k_count];
+    zh[k_hi] = "你好";
+    zh[k_bye] = "再见";
+    en[k_hi] = "Hello";
+    en[k_bye] = "Bye";
+
+    skiff::i18n::registerCatalog("zh-CN", zh, k_count);
+    skiff::i18n::registerCatalog("en", en, k_count);
+
+    skiff::i18n::setLocale("zh-CN");
+    CHECK(skiff::i18n::locale() == "zh-CN");
+    CHECK(tr(k_hi) == "你好");
+    CHECK(tr(k_bye) == "再见");
+    CHECK(skiff::i18n::t(k_hi) == "你好");
+
+    skiff::i18n::setLocale("en");
+    CHECK(skiff::i18n::locale() == "en");
+    CHECK(tr(k_hi) == "Hello");
+    CHECK(tr(k_bye) == "Bye");
+
+    const std::string& a = skiff::i18n::t(k_hi);
+    const std::string& b = skiff::i18n::t(k_hi);
+    CHECK(&a == &b);
+
+    // 越界 → 空串
+    CHECK(skiff::i18n::t(-1).empty());
+    CHECK(skiff::i18n::t(k_count).empty());
+}
+
 int main() {
     test_router();
     test_router_middle_duplicate();
@@ -398,6 +431,7 @@ int main() {
     test_tabview_content_bg();
     test_tab_title();
     test_apply_options_default();
+    test_i18n();
 
     if (failures == 0) {
         std::printf("all tests passed\n");

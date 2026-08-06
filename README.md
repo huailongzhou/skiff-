@@ -5,13 +5,15 @@
 - 核心后端无关(纯头文件 `include/skiff/`)，换后端不改页面代码
 - 元素:`ElementView` 包装 + `VStack` / `HStack` / `Text` / `Button` / `Spacer` / `Slider` / `TabView` / `TapArea` / `External`
 - 组合组件(纯 DSL):`TopNav`(顶部导航条)、`TabView`(页签菜单 + 内容区)、`AppGrid`(分页应用网格)、`DropDown`(下拉菜单)、`List`(垂直列表)、`Router`(页面栈路由)、`AppUi`(应用 UI 基类)
+- 多国语言框架:`include/skiff/i18n.hpp`（`registerCatalog` / `setLocale` / `t` / 宏 `tr`）
+- PND 业务文案:`examples/pnd_i18n.hpp`（枚举 key + 中英表 + `pnd::i18n::init`）
 - 当前后端：**LVGL 8**(嵌入式渲染) + **SDL3**(PC 预览宿主，仅出窗口/输入)
 - 支持 **FreeType 矢量字体**(TTF，任意字号中文)
 
 ## 目录结构
 
 ```
-include/skiff/          核心:Element / ElementView / State / Backend / Platform
+include/skiff/          核心:Element / ElementView / State / Backend / Platform / i18n
 include/skiff/components/ 组合组件(纯 DSL，后端无关)
 include/skiff/elements/   属性描述类(attrOptions、listOptions 等)
 backends/lvgl/          LVGL 后端 + SDL3 宿主
@@ -19,6 +21,7 @@ examples/               示例
   counter           无头冒烟测试
   counter_sdl       SDL3 窗口:计数器
   pnd_sdl           平台无关的车机 PND UI 定义(无 main,被平台入口包含)
+  pnd_i18n          PND 业务文案(枚举 + 中英目录)
   freetype_check    FreeType / 字体覆盖检查
 platforms/              平台入口(挂载 PND UI + 注册平台能力)
   mac/              pnd_mac(macOS:afplay 音乐 / DisplayServices 亮度)

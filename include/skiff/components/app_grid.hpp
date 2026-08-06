@@ -24,7 +24,7 @@ namespace components {
 
 struct AppIcon {
     const char* icon;                // 图标:可以是 LVGL 符号字体或任意 UTF-8 文本
-    const char* label;               // 应用名称
+    std::string label;               // 应用名称(支持 i18n::tr 结果)
     std::function<void()> onTap;     // 点击回调
 };
 

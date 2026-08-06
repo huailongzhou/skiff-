@@ -8,6 +8,7 @@
 #include "platform.hpp"
 #include "input.hpp"
 #include "layout.hpp"
+#include "i18n.hpp"
 #include "elements/attr_options.hpp"
 #include "components/tabview.hpp"
 #include "components/top_nav.hpp"
