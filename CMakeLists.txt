@@ -13,6 +13,21 @@ target_include_directories(skiff INTERFACE ${CMAKE_CURRENT_SOURCE_DIR}/include)
 enable_testing()
 add_subdirectory(tests)
 
+# ---------- Box2D:应用核(物理场景)依赖,与 UI 无关 ----------
+# box2d 2.4.1 声明的 cmake 最低版本过旧,CMake 4.x 需放宽策略下限
+set(CMAKE_POLICY_VERSION_MINIMUM 3.5)
+set(BOX2D_BUILD_UNIT_TESTS OFF CACHE BOOL "" FORCE)
+set(BOX2D_BUILD_TESTBED OFF CACHE BOOL "" FORCE)
+set(BOX2D_BUILD_DOCS OFF CACHE BOOL "" FORCE)
+add_subdirectory(third_party/box2d EXCLUDE_FROM_ALL)
+
+add_executable(physics_headless examples/physics_headless.cpp)
+target_link_libraries(physics_headless PRIVATE box2d)
+add_test(NAME physics_headless COMMAND physics_headless)
+
+add_executable(music_headless examples/music_headless.cpp)
+add_test(NAME music_headless COMMAND music_headless)
+
 # ---------- LVGL 8 后端(可选,-DSKIFF_BACKEND_LVGL=OFF 可关闭) ----------
 option(SKIFF_BACKEND_LVGL "Build the LVGL 8 backend" ON)
 
@@ -58,12 +73,6 @@ if(SKIFF_BACKEND_LVGL)
 
         add_executable(counter_sdl examples/counter_sdl.cpp)
         target_link_libraries(counter_sdl PRIVATE skiff_lvgl_sdl3)
-
-        # Box2D 2.4(从 domi 同步的源码);只编库,不编官方 testbed
-        set(BOX2D_BUILD_UNIT_TESTS OFF CACHE BOOL "" FORCE)
-        set(BOX2D_BUILD_TESTBED OFF CACHE BOOL "" FORCE)
-        set(BOX2D_BUILD_DOCS OFF CACHE BOOL "" FORCE)
-        add_subdirectory(third_party/box2d EXCLUDE_FROM_ALL)
 
         add_executable(physics_sdl examples/physics_sdl.cpp)
         target_link_libraries(physics_sdl PRIVATE skiff_lvgl_sdl3 box2d)

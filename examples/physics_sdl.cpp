@@ -6,7 +6,9 @@
 #include <functional>
 #include <string>
 
-#include "physics_sim.hpp"
+#include "app_core/physics_scene.hpp"
+#include "app_core/scene_host.hpp"
+#include "physics_draw.hpp"
 #include "skiff/skiff.hpp"
 #include "skiff_lvgl.hpp"
 #include "skiff_lvgl_sdl3.hpp"
@@ -30,6 +32,19 @@ skiff::ElementView toolBtn(const char* label, std::function<void()> onTap) {
         .ttf(kFont, 14);
 }
 
+void syncPhysicsUi(skiff::components::PageView& page, const app::PhysicsScene& scene) {
+    skiff::components::StateView& st = page.stateView();
+    const int frame = (int)scene.frame();
+    skiff::State<int>& frameSt = st.get<int>("frame");
+    if (frameSt.get() != frame) frameSt.set(frame);
+    const bool paused = scene.paused();
+    skiff::State<bool>& pausedSt = st.get<bool>("paused");
+    if (pausedSt.get() != paused) pausedSt.set(paused);
+    const int shape = scene.dropCircle() ? 1 : 0;
+    skiff::State<int>& shapeSt = st.get<int>("shape");
+    if (shapeSt.get() != shape) shapeSt.set(shape);
+}
+
 } // namespace
 
 int main(int argc, char** argv) {
@@ -38,16 +53,21 @@ int main(int argc, char** argv) {
     lv_init();
     skiff::lvgl::createSdl3Display(kWinW, kWinH, "skiff canvas + Box2D");
 
-    pnd::physics::Sim sim(kCanvasW, kCanvasH);
+    app::PhysicsScene scene(kCanvasW, kCanvasH);
+    app::SceneHost host;
+    host.add(scene);
+    host.activate("physics");
+
     skiff::components::PageView page("physics", {
         skiff::components::state::of<int>("frame", 0),
         skiff::components::state::of<bool>("paused", false),
         skiff::components::state::of<int>("shape", 0),
     });
+    scene.onChange([&page, &scene] { syncPhysicsUi(page, scene); });
 
     skiff::lvgl::LvglBackend backend(lv_scr_act());
-    skiff::App app(backend, [&page, &sim]() -> skiff::Element {
-        return page.render([&sim](skiff::components::StateView& st) -> skiff::Element {
+    skiff::App app(backend, [&page, &scene]() -> skiff::Element {
+        return page.render([&scene](skiff::components::StateView& st) -> skiff::Element {
             skiff::State<int>& frame = st.get<int>("frame");
             skiff::State<bool>& paused = st.get<bool>("paused");
             skiff::State<int>& shape = st.get<int>("shape");
@@ -56,28 +76,26 @@ int main(int argc, char** argv) {
                 skiff::HStack({
                     skiff::Text("Box2D").ttf(kFont, 20).fg(0xE8EEF7),
                     skiff::Spacer(),
-                    skiff::Watch(paused, [&paused](bool p) -> skiff::Element {
+                    skiff::Watch(paused, [&scene](bool p) -> skiff::Element {
                         return toolBtn(p ? "继续" : "暂停",
-                                       [&paused] { paused.set(!paused.get()); });
+                                       [&scene] { scene.togglePaused(); });
                     }),
-                    skiff::Watch(shape, [&shape](int s) -> skiff::Element {
+                    skiff::Watch(shape, [&scene](int s) -> skiff::Element {
                         return toolBtn(s == 0 ? "投方块" : "投圆球",
-                                       [&shape, s] { shape.set(s == 0 ? 1 : 0); });
+                                       [&scene] {
+                                           scene.setDropCircle(!scene.dropCircle());
+                                       });
                     }),
-                    toolBtn("重置", [&sim, &frame] {
-                        sim.reset();
-                        frame.set(frame.get() + 1);
-                    }),
+                    toolBtn("重置", [&scene] { scene.reset(); }),
                 }, 8).widthPct(100).size(0, kBarH).pad(8).bg(0x12161F),
 
-                skiff::Watch(frame, [&sim, &frame, &shape](int) -> skiff::Element {
+                skiff::Watch(frame, [&scene](int) -> skiff::Element {
                     return skiff::Canvas(kCanvasW, kCanvasH,
-                                         [&sim](skiff::CanvasContext& c) {
-                                             sim.paint(c);
+                                         [&scene](skiff::CanvasContext& c) {
+                                             pnd::physics::paintScene(c, scene);
                                          })
-                        .onTapAt([&sim, &frame, &shape](int x, int y) {
-                            sim.spawnAtCanvas(x, y, shape.get() != 0);
-                            frame.set(frame.get() + 1);
+                        .onTapAt([&scene](int x, int y) {
+                            scene.spawnAtCanvas(x, y);
                         });
                 }),
 
@@ -93,26 +111,14 @@ int main(int argc, char** argv) {
     app.start();
 
     uint32_t last = lv_tick_get();
-    float acc = 0.0f;
-    const float dt = 1.0f / 60.0f;
     int frames = 0;
     while (skiff::lvgl::sdl3Pump()) {
         const uint32_t now = lv_tick_get();
-        acc += (now - last) * 0.001f;
+        float dt = (now - last) * 0.001f;
         last = now;
-        if (acc > 0.25f) acc = 0.25f;
-
-        skiff::State<bool>& paused = page.stateView().get<bool>("paused");
-        skiff::State<int>& frame = page.stateView().get<int>("frame");
-        bool dirty = false;
-        while (acc >= dt) {
-            acc -= dt;
-            if (!paused.get()) {
-                sim.step(dt);
-                dirty = true;
-            }
-        }
-        if (dirty) frame.set(frame.get() + 1);
+        if (dt < 0.0f) dt = 0.0f;
+        if (dt > 0.25f) dt = 0.25f;
+        host.tick(dt);
 
         lv_timer_handler();
         app.update();

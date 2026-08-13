@@ -96,6 +96,19 @@ void registerWinPlatform(skiff::Platform& platform) {
                 std::printf("[WinPlatform] stopMusic\n");
             });
     }
+
+    if (platform.hasDeclared("setVolume")) {
+        platform.registerExternal("setVolume",
+            [](const std::vector<std::string>& args) {
+                if (args.empty()) return;
+                int pct = std::atoi(args[0].c_str());
+                if (pct < 0) pct = 0;
+                if (pct > 100) pct = 100;
+                const DWORD level = (DWORD)(pct * 0xFFFF / 100);
+                waveOutSetVolume(0, (level << 16) | level);
+                std::printf("[WinPlatform] setVolume %d%%\n", pct);
+            });
+    }
 }
 
 } // namespace

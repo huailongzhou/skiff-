@@ -175,6 +175,21 @@ void registerMacPlatform(skiff::Platform& platform) {
                 std::printf("[MacPlatform] openFile %s\n", path.c_str());
             });
     }
+
+    if (platform.hasDeclared("setVolume")) {
+        platform.registerExternal("setVolume",
+            [](const std::vector<std::string>& args) {
+                if (args.empty()) return;
+                int pct = std::atoi(args[0].c_str());
+                if (pct < 0) pct = 0;
+                if (pct > 100) pct = 100;
+                std::string cmd =
+                    "osascript -e 'set volume output volume " +
+                    std::to_string(pct) + "' >/dev/null 2>&1";
+                std::system(cmd.c_str());
+                std::printf("[MacPlatform] setVolume %d%%\n", pct);
+            });
+    }
 }
 
 } // namespace

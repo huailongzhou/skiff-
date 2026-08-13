@@ -18,9 +18,13 @@ include/skiff/components/ 组合组件(纯 DSL，后端无关)
 include/skiff/elements/   属性描述类(attrOptions、listOptions 等)
 backends/lvgl/          LVGL 后端 + SDL3 宿主
 examples/               示例
+  app_core/         无头应用核(Scene / SceneHost / PhysicsScene / MusicScene,不依赖 Skiff/LVGL)
   counter           无头冒烟测试
   counter_sdl       SDL3 窗口:计数器
+  physics_headless  无 UI:跑物理场景并自检
+  music_headless    无 UI:播放列表/循环/暂停自检
   physics_sdl       SDL3 窗口:Canvas + Box2D 物理模拟
+  physics_draw      UI 侧 Canvas 调试绘制(把 Box2D debugDraw 接到 Canvas)
   pnd_sdl           平台无关的车机 PND UI 定义(无 main,被平台入口包含)
   pnd_i18n          PND 业务文案(枚举 + 中英目录)
   freetype_check    FreeType / 字体覆盖检查
@@ -48,6 +52,8 @@ cmake --build build -j
 
 ```bash
 ./build/counter          # 无头冒烟:状态 → 重建链路
+./build/physics_headless # 无 UI:Box2D 场景步进自检
+./build/music_headless   # 无 UI:播放列表逻辑自检
 ./build/counter_sdl      # SDL3 窗口:计数器
 ./build/physics_sdl      # SDL3 窗口:Canvas + Box2D 物理模拟
 ./build/pnd_mac          # SDL3 窗口:车机 PND 主页(macOS 平台入口)

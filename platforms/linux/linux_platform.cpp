@@ -380,6 +380,23 @@ void registerLinuxPlatform(skiff::Platform& platform) {
                 gMusicService.requestStop();
             });
     }
+
+    if (platform.hasDeclared("setVolume")) {
+        platform.registerExternal("setVolume",
+            [](const std::vector<std::string>& args) {
+                if (args.empty()) return;
+                int pct = std::atoi(args[0].c_str());
+                if (pct < 0) pct = 0;
+                if (pct > 100) pct = 100;
+                const std::string cmd =
+                    "amixer -q set Master " + std::to_string(pct) + "%";
+                if (std::system(cmd.c_str()) == 0) {
+                    std::printf("[LinuxPlatform] setVolume %d%%\n", pct);
+                } else {
+                    std::printf("[LinuxPlatform] setVolume %d%% failed\n", pct);
+                }
+            });
+    }
 }
 
 } // namespace

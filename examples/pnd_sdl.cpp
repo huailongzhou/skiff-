@@ -12,7 +12,10 @@
 
 #include "skiff/skiff.hpp"
 #include "pnd_i18n.hpp"
-#include "physics_sim.hpp"
+#include "app_core/music_scene.hpp"
+#include "app_core/physics_scene.hpp"
+#include "app_core/scene_host.hpp"
+#include "physics_draw.hpp"
 
 using skiff::Element;
 using skiff::ElementView;
@@ -183,12 +186,11 @@ Element languageRow(const std::string& locale,
     }, 0).size(0, 48).widthPct(100).centered();
 }
 
-Element brightnessRow(int brightness, State<int>& brightnessState) {
+Element brightnessRow(int brightness, std::function<void(int)> onChange) {
     return skiff::HStack({
         skiff::Text(SKIFF_TR(app_brightness)).ttf(kFont, 18).fg(kHi),
         skiff::Spacer(),
-        skiff::Slider(brightness, 0, 100,
-                      [&brightnessState](int v) { brightnessState.set(v); })
+        skiff::Slider(brightness, 0, 100, std::move(onChange))
             .size(180, 24),
         skiff::Text(std::to_string(brightness) + "%")
             .ttf(kFont, 16).fg(kLo).size(48, 24),
@@ -197,57 +199,6 @@ Element brightnessRow(int brightness, State<int>& brightnessState) {
 
 // ---- 音乐播放:横屏 Now Playing(参考 CarPlay / Apple Music) ----
 
-struct TrackMeta {
-    const char* path;
-    const char* title;
-    const char* artist;
-    int durationSec;
-    uint32_t artColor;
-};
-
-const TrackMeta kTracks[] = {
-    {"assets/music/sample.wav", "Sample", "Demo", 32, 0xD84315},
-    {"assets/music/mickeyscat-moment-of-peace-mickeyscat-554494.mp3",
-     "Moment of Peace", "Mickeyscat", 214, 0x1B4F72},
-};
-const int kTrackCount = static_cast<int>(sizeof(kTracks) / sizeof(kTracks[0]));
-
-std::string fileStem(const std::string& path) {
-    std::string name = path;
-    const std::size_t slash = name.find_last_of("/\\");
-    if (slash != std::string::npos) name = name.substr(slash + 1);
-    const std::size_t dot = name.find_last_of('.');
-    if (dot != std::string::npos && dot > 0) name = name.substr(0, dot);
-    if (name.empty()) name = "Unknown";
-    return name;
-}
-
-int trackIndexOf(const std::string& path) {
-    for (int i = 0; i < kTrackCount; ++i) {
-        if (path == kTracks[i].path) return i;
-    }
-    return 0;
-}
-
-const TrackMeta* findTrack(const std::string& path) {
-    for (int i = 0; i < kTrackCount; ++i) {
-        if (path == kTracks[i].path) return &kTracks[i];
-    }
-    return 0;
-}
-
-std::string trackTitleOf(const std::string& path) {
-    const TrackMeta* m = findTrack(path);
-    if (m) return m->title;
-    return fileStem(path);
-}
-
-std::string trackArtistOf(const std::string& path) {
-    const TrackMeta* m = findTrack(path);
-    if (m) return m->artist;
-    return SKIFF_TR(music_unknown_artist);
-}
-
 std::string formatClock(int sec) {
     if (sec < 0) sec = 0;
     char buf[16];
@@ -255,52 +206,33 @@ std::string formatClock(int sec) {
     return buf;
 }
 
-void startMusicTrack(skiff::Platform& platform,
-                     State<std::string>& currentTrack,
-                     State<bool>& playing,
-                     State<int>& progress,
-                     const std::string& path) {
-    currentTrack.set(path);
-    progress.set(0);
-    playing.set(true);
-    platform.invokeLater("stopMusic", {});
-    platform.invokeLater("playMusic", {path});
-}
-
-int nextTrackIndex(int current, bool shuffle) {
-    if (kTrackCount <= 1) return 0;
-    if (!shuffle) return (current + 1) % kTrackCount;
-    int n = std::rand() % (kTrackCount - 1);
-    if (n >= current) ++n;
-    return n;
-}
-
-Element musicAlbumArt(const std::string& path) {
-    const TrackMeta* meta = findTrack(path);
-    const uint32_t color = meta ? meta->artColor : kMusic;
+Element musicAlbumArt(const app::TrackInfo& track) {
     return skiff::VStack({
         skiff::VStack({
             skiff::Text(ICON_AUDIO).font(72).fg(0xFFFFFF),
-        }).size(220, 220).bg(color).radius(16).centered(),
+        }).size(220, 220).bg(track.artColor).radius(16).centered(),
     }).size(236, 236).bg(0x0A0E12).radius(20).centered();
 }
 
-Element musicTitleBlock(const std::string& path) {
+Element musicTitleBlock(const app::TrackInfo& track) {
+    const std::string artist = (track.artist && track.artist[0])
+                                   ? std::string(track.artist)
+                                   : std::string(SKIFF_TR(music_unknown_artist));
     return skiff::VStack({
         skiff::Text(SKIFF_TR(music_now_playing)).ttf(kFont, 13).fg(kMusic),
-        skiff::Text(trackTitleOf(path)).ttf(kFont, 26).fg(kHi),
-        skiff::Text(trackArtistOf(path)).ttf(kFont, 16).fg(kLo),
+        skiff::Text(track.title).ttf(kFont, 26).fg(kHi),
+        skiff::Text(artist).ttf(kFont, 16).fg(kLo),
     }, 4);
 }
 
-Element musicProgressRow(int progress, int durationSec, State<int>& progressState) {
+Element musicProgressRow(int progress, int durationSec,
+                         std::function<void(int)> onSeek) {
     int elapsed = 0;
     if (durationSec > 0) elapsed = progress * durationSec / 100;
     if (elapsed > durationSec) elapsed = durationSec;
     return skiff::HStack({
         skiff::Text(formatClock(elapsed)).ttf(kFont, 12).fg(kLo).size(44, 16),
-        skiff::Slider(progress, 0, 100,
-                      [&progressState](int v) { progressState.set(v); })
+        skiff::Slider(progress, 0, 100, std::move(onSeek))
             .expand()
             .size(0, 16),
         skiff::Text(formatClock(durationSec)).ttf(kFont, 12).fg(kLo).size(44, 16),
@@ -316,22 +248,11 @@ Element musicIconBtn(const char* icon, uint32_t fg, int size,
         .radius(size / 2);
 }
 
-Element musicPlayButton(bool playing, skiff::Platform& platform,
-                        State<bool>& playingState,
-                        State<std::string>& trackState) {
+Element musicPlayButton(bool playing, std::function<void()> onTap) {
     return skiff::Button({skiff::Text(playing ? ICON_PAUSE : ICON_PLAY)
                               .font(28)
                               .fg(0x1A1A1A)},
-                         [&platform, &playingState, &trackState] {
-                             if (playingState.get()) {
-                                 platform.invokeLater("stopMusic", {});
-                                 playingState.set(false);
-                             } else {
-                                 platform.invokeLater(
-                                     "playMusic", {trackState.get()});
-                                 playingState.set(true);
-                             }
-                         })
+                         std::move(onTap))
         .size(72, 72)
         .bg(0xFFFFFF)
         .radius(36);
@@ -347,9 +268,9 @@ Element networkSubmenu() {
     }, 0).sizePct(100, 100).pad(20).bg(kTile);
 }
 
-Element displaySubmenu(int brightness, State<int>& brightnessState) {
+Element displaySubmenu(int brightness, std::function<void(int)> onBrightness) {
     return skiff::VStack({
-        brightnessRow(brightness, brightnessState),
+        brightnessRow(brightness, std::move(onBrightness)),
         settingsRow(SKIFF_TR(settings_auto_brightness), SKIFF_TR(common_on)),
         settingsRow(SKIFF_TR(settings_night_mode), SKIFF_TR(common_off)),
         settingsRow(SKIFF_TR(settings_resolution), "800x480"),
@@ -388,10 +309,13 @@ class PndUi : public components::AppUi {
 public:
     explicit PndUi(Platform& platform)
         : components::AppUi(platform, "home"),
-          sim_(kPhysCanvasW, kPhysCanvasH),
-          physicsAcc_(0.0f),
-          physicsPage_(0) {
-        physicsLast_ = std::chrono::steady_clock::now();
+          musicSink_(platform),
+          physics_(kPhysCanvasW, kPhysCanvasH),
+          physicsPage_(0),
+          musicPage_(0) {
+        tickLast_ = std::chrono::steady_clock::now();
+        music_.setSink(&musicSink_);
+        scenes_.add(physics_);
         pnd::i18n::init("zh-CN");
         // 注册全局状态(由 StateView 持有,bindAll 一次性绑定)
         globalStatesInit(skiff::components::state::BOOL, {
@@ -404,26 +328,28 @@ public:
             {"mediaCategory", 0},
         });
         globalStatesInit(skiff::components::state::STRING, {
-            {"currentTrack", "assets/music/sample.wav"},
+            {"currentTrack", music_.current().path},
             {"locale", "zh-CN"},
         });
         // 声明需要的平台能力,具体实现由平台入口注册
         platform.declare("setBrightness");
+        platform.declare("setVolume");
         platform.declare("playMusic");
         platform.declare("stopMusic");
         platform.declare("openFile");
-        // 订阅平台事件(平台 → UI 上报,如播放进度)
+        // 平台播放器 → 场景(再投影到 UI)
         platform.on("musicProgress", [this](const std::vector<std::string>& args) {
             if (!args.empty()) {
-                states().get<int>("musicProgress").set(std::atoi(args[0].c_str()));
+                music_.setProgressFromOutput(std::atoi(args[0].c_str()));
             }
         });
         platform.on("musicEnded", [this](const std::vector<std::string>&) {
-            states().get<bool>("musicPlaying").set(false);
-            states().get<int>("musicProgress").set(0);
+            music_.onPlaybackEnded();
         });
         setupPages_();
         setupOverlay_();
+        physics_.onChange([this] { syncPhysicsUi_(); });
+        music_.onChange([this] { syncMusicUi_(); });
     }
 
     void toggleMenu() {
@@ -434,28 +360,14 @@ public:
     void tick() {
         const std::chrono::steady_clock::time_point now =
             std::chrono::steady_clock::now();
-        if (router().current() != "physics" || physicsPage_ == 0) {
-            physicsLast_ = now;
-            physicsAcc_ = 0.0f;
-            return;
-        }
-        float dt = std::chrono::duration<float>(now - physicsLast_).count();
-        physicsLast_ = now;
+        float dt = std::chrono::duration<float>(now - tickLast_).count();
+        tickLast_ = now;
+        if (dt < 0.0f) dt = 0.0f;
         if (dt > 0.25f) dt = 0.25f;
-        physicsAcc_ += dt;
 
-        State<bool>& paused = physicsPage_->stateView().get<bool>("paused");
-        State<int>& frame = physicsPage_->stateView().get<int>("frame");
-        const float step = 1.0f / 60.0f;
-        bool dirty = false;
-        while (physicsAcc_ >= step) {
-            physicsAcc_ -= step;
-            if (!paused.get()) {
-                sim_.step(step);
-                dirty = true;
-            }
-        }
-        if (dirty) frame.set(frame.get() + 1);
+        if (router().current() == "physics") scenes_.activate("physics");
+        else scenes_.deactivate();
+        scenes_.tick(dt);
     }
 
 private:
@@ -474,62 +386,44 @@ private:
             State<int>& repeat_ = st.get<int>("repeat");
             State<int>& volume_ = st.get<int>("volume");
 
-            Element album = skiff::Watch(currentTrack_, [](const std::string& track) {
-                return musicAlbumArt(track);
+            Element album = skiff::Watch(currentTrack_, [this](const std::string&) {
+                return musicAlbumArt(music_.current());
             });
 
-            Element titles = skiff::Watch(currentTrack_, [](const std::string& track) {
-                return musicTitleBlock(track);
+            Element titles = skiff::Watch(currentTrack_, [this](const std::string&) {
+                return musicTitleBlock(music_.current());
             });
 
             Element progressRow = skiff::Watch(
-                currentTrack_, [&musicProgress_](const std::string& track) {
-                    const TrackMeta* meta = findTrack(track);
-                    const int duration = meta ? meta->durationSec : 180;
+                currentTrack_, [this, &musicProgress_](const std::string&) {
+                    const int duration = music_.current().durationSec;
                     return skiff::Watch(
-                        musicProgress_, [duration, &musicProgress_](int p) {
-                            return musicProgressRow(p, duration, musicProgress_);
+                        musicProgress_, [this, duration](int p) {
+                            return musicProgressRow(p, duration, [this](int v) {
+                                music_.seek(v);
+                            });
                         });
                 });
 
-            Element shuffleBtn = skiff::Watch(shuffle_, [&shuffle_](bool on) {
+            Element shuffleBtn = skiff::Watch(shuffle_, [this](bool on) {
                 return musicIconBtn(ICON_SHUFFLE, on ? kMusic : kLo, 48,
-                                    [&shuffle_] { shuffle_.set(!shuffle_.get()); });
+                                    [this] { music_.toggleShuffle(); });
             });
 
             Element prevBtn = musicIconBtn(
-                ICON_PREV, kHi, 52, [this, &currentTrack_, &musicPlaying_,
-                                     &musicProgress_] {
-                    const int p = musicProgress_.get();
-                    if (p > 5) {
-                        startMusicTrack(platform(), currentTrack_, musicPlaying_,
-                                        musicProgress_, currentTrack_.get());
-                        return;
-                    }
-                    const int i = trackIndexOf(currentTrack_.get());
-                    const int prev = (i - 1 + kTrackCount) % kTrackCount;
-                    startMusicTrack(platform(), currentTrack_, musicPlaying_,
-                                    musicProgress_, kTracks[prev].path);
-                });
+                ICON_PREV, kHi, 52, [this] { music_.prev(); });
 
             Element playBtn = skiff::Watch(
-                musicPlaying_, [this, &musicPlaying_, &currentTrack_](bool playing) {
-                    return musicPlayButton(playing, platform(), musicPlaying_,
-                                           currentTrack_);
+                musicPlaying_, [this](bool playing) {
+                    return musicPlayButton(playing, [this] { music_.togglePlay(); });
                 });
 
             Element nextBtn = musicIconBtn(
-                ICON_NEXT, kHi, 52, [this, &currentTrack_, &musicPlaying_,
-                                     &musicProgress_, &shuffle_] {
-                    const int i = trackIndexOf(currentTrack_.get());
-                    const int n = nextTrackIndex(i, shuffle_.get());
-                    startMusicTrack(platform(), currentTrack_, musicPlaying_,
-                                    musicProgress_, kTracks[n].path);
-                });
+                ICON_NEXT, kHi, 52, [this] { music_.next(); });
 
-            Element repeatBtn = skiff::Watch(repeat_, [&repeat_](int mode) {
+            Element repeatBtn = skiff::Watch(repeat_, [this](int mode) {
                 return musicIconBtn(ICON_LOOP, mode != 0 ? kMusic : kLo, 48,
-                                    [&repeat_] { repeat_.set(repeat_.get() == 0 ? 1 : 0); });
+                                    [this] { music_.toggleRepeat(); });
             });
 
             Element controls = skiff::HStack({
@@ -540,10 +434,10 @@ private:
                 repeatBtn,
             }, 16).centered();
 
-            Element volumeRow = skiff::Watch(volume_, [&volume_](int v) {
+            Element volumeRow = skiff::Watch(volume_, [this](int v) {
                 return skiff::HStack({
                     skiff::Text(ICON_VOLUME).font(16).fg(kLo),
-                    skiff::Slider(v, 0, 100, [&volume_](int n) { volume_.set(n); })
+                    skiff::Slider(v, 0, 100, [this](int n) { music_.setVolume(n); })
                         .expand()
                         .size(0, 16),
                     skiff::Text(std::to_string(v) + "%")
@@ -602,24 +496,14 @@ private:
                  [this] { platform().invokeExternal("openFile", {"assets/media/sample.mp4"}); }},
             };
             std::vector<skiff::components::ListItem> musicItems = {
-                {"Moment of Peace", "Mickeyscat",
+                {music_.track(1).title, music_.track(1).artist,
                  [this] {
-                     const std::string track = kTracks[1].path;
-                     startMusicTrack(platform(),
-                                     states().get<std::string>("currentTrack"),
-                                     states().get<bool>("musicPlaying"),
-                                     states().get<int>("musicProgress"),
-                                     track);
+                     music_.playTrack(music_.track(1).path);
                      router().push("music");
                  }},
-                {"Sample", "Demo",
+                {music_.track(0).title, music_.track(0).artist,
                  [this] {
-                     const std::string track = kTracks[0].path;
-                     startMusicTrack(platform(),
-                                     states().get<std::string>("currentTrack"),
-                                     states().get<bool>("musicPlaying"),
-                                     states().get<int>("musicProgress"),
-                                     track);
+                     music_.playTrack(music_.track(0).path);
                      router().push("music");
                  }},
             };
@@ -663,14 +547,13 @@ private:
             State<bool>& paused = st.get<bool>("paused");
             State<int>& shape = st.get<int>("shape");
 
-            Element canvas = skiff::Watch(frame, [this, &frame, &shape](int) -> Element {
+            Element canvas = skiff::Watch(frame, [this](int) -> Element {
                 return skiff::Canvas(kPhysCanvasW, kPhysCanvasH,
                                      [this](skiff::CanvasContext& c) {
-                                         sim_.paint(c);
+                                         pnd::physics::paintScene(c, physics_);
                                      })
-                    .onTapAt([this, &frame, &shape](int x, int y) {
-                        sim_.spawnAtCanvas(x, y, shape.get() != 0);
-                        frame.set(frame.get() + 1);
+                    .onTapAt([this](int x, int y) {
+                        physics_.spawnAtCanvas(x, y);
                     });
             });
 
@@ -679,19 +562,21 @@ private:
                     .ttf(kFont, 14)
                     .fg(kLo)
                     .widthPct(100),
-                skiff::Watch(paused, [&paused](bool p) -> Element {
+                skiff::Watch(paused, [this](bool p) -> Element {
                     return physicsToolBtn(p ? SKIFF_TR(physics_resume)
                                             : SKIFF_TR(physics_pause),
-                                          [&paused] { paused.set(!paused.get()); });
+                                          [this] { physics_.togglePaused(); });
                 }),
-                skiff::Watch(shape, [&shape](int s) -> Element {
+                skiff::Watch(shape, [this](int s) -> Element {
                     return physicsToolBtn(s == 0 ? SKIFF_TR(physics_drop_box)
                                                  : SKIFF_TR(physics_drop_ball),
-                                          [&shape, s] { shape.set(s == 0 ? 1 : 0); });
+                                          [this] {
+                                              physics_.setDropCircle(
+                                                  !physics_.dropCircle());
+                                          });
                 }),
-                physicsToolBtn(SKIFF_TR(physics_reset), [this, &frame] {
-                    sim_.reset();
-                    frame.set(frame.get() + 1);
+                physicsToolBtn(SKIFF_TR(physics_reset), [this] {
+                    physics_.reset();
                 }),
                 skiff::Spacer(),
             }, 10).size(kPhysSideW, kPhysCanvasH).pad(12).bg(0x1A222B);
@@ -779,8 +664,12 @@ private:
                 .bg(0x1A222B),
                 skiff::components::TabView({
                     {SKIFF_TR(settings_network), networkSubmenu()},
-                    {SKIFF_TR(settings_display), skiff::Watch(brightness, [&brightness](int v) {
-                        return displaySubmenu(v, brightness);
+                    {SKIFF_TR(settings_display), skiff::Watch(brightness, [this, &brightness](int v) {
+                        return displaySubmenu(v, [this, &brightness](int n) {
+                            brightness.set(n);
+                            platform().invokeExternal("setBrightness",
+                                                     {std::to_string(n)});
+                        });
                     })},
                     {SKIFF_TR(settings_sound), soundSubmenu()},
                     {SKIFF_TR(settings_system), systemSubmenu(locale.get(), [this](const std::string& next) {
@@ -845,7 +734,7 @@ private:
         };
 
         router().add("home", {}, homeBody);
-        router().add("music", {
+        musicPage_ = &router().add("music", {
             skiff::components::state::of<bool>("shuffle", false),
             skiff::components::state::of<int>("repeat", 0),
             skiff::components::state::of<int>("volume", 70),
@@ -894,10 +783,60 @@ private:
         });
     }
 
-    pnd::physics::Sim sim_;
-    float physicsAcc_;
-    std::chrono::steady_clock::time_point physicsLast_;
+    void syncPhysicsUi_() {
+        if (!physicsPage_) return;
+        components::StateView& st = physicsPage_->stateView();
+        const int frame = (int)physics_.frame();
+        State<int>& frameSt = st.get<int>("frame");
+        if (frameSt.get() != frame) frameSt.set(frame);
+        const bool paused = physics_.paused();
+        State<bool>& pausedSt = st.get<bool>("paused");
+        if (pausedSt.get() != paused) pausedSt.set(paused);
+        const int shape = physics_.dropCircle() ? 1 : 0;
+        State<int>& shapeSt = st.get<int>("shape");
+        if (shapeSt.get() != shape) shapeSt.set(shape);
+    }
+
+    void syncMusicUi_() {
+        State<std::string>& track = states().get<std::string>("currentTrack");
+        if (track.get() != music_.current().path) {
+            track.set(music_.current().path);
+        }
+        State<bool>& playing = states().get<bool>("musicPlaying");
+        if (playing.get() != music_.playing()) playing.set(music_.playing());
+        State<int>& progress = states().get<int>("musicProgress");
+        if (progress.get() != music_.progress()) progress.set(music_.progress());
+        if (!musicPage_) return;
+        components::StateView& st = musicPage_->stateView();
+        State<bool>& shuffle = st.get<bool>("shuffle");
+        if (shuffle.get() != music_.shuffle()) shuffle.set(music_.shuffle());
+        const int repeat = music_.repeat() ? 1 : 0;
+        State<int>& repeatSt = st.get<int>("repeat");
+        if (repeatSt.get() != repeat) repeatSt.set(repeat);
+        State<int>& volume = st.get<int>("volume");
+        if (volume.get() != music_.volume()) volume.set(music_.volume());
+    }
+
+    struct PlatformMusicSink : app::MusicSink {
+        explicit PlatformMusicSink(Platform& p) : platform_(p) {}
+        void play(const char* path) {
+            platform_.invokeLater("stopMusic", {});
+            if (path) platform_.invokeLater("playMusic", {std::string(path)});
+        }
+        void stop() { platform_.invokeLater("stopMusic", {}); }
+        void setVolume(int percent) {
+            platform_.invokeLater("setVolume", {std::to_string(percent)});
+        }
+        Platform& platform_;
+    };
+
+    PlatformMusicSink musicSink_;
+    app::MusicScene music_;
+    app::SceneHost scenes_;
+    app::PhysicsScene physics_;
+    std::chrono::steady_clock::time_point tickLast_;
     components::PageView* physicsPage_;
+    components::PageView* musicPage_;
 };
 
 } // namespace demo
