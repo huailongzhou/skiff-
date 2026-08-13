@@ -6,13 +6,12 @@
 //   3. name_      —— 页面名,导航匹配用
 //
 // 用法(无需子类,整页代码一处写完):
+//   enum { tab = 0 };
 //   skiff::components::PageView settingsPage("设置", {
-//       skiff::components::state::ref("page", nav),   // 外部状态,仅注册引用
-//       skiff::components::state::of<int>("tab", 0),  // 本页状态,StateView 持有
+//       skiff::components::state::of<int>(tab, 0),  // 本页状态,StateView 持有
 //   });
-//   // App 的 body 里:
 //   settingsPage.render([](skiff::components::StateView& st) -> Element {
-//       State<int>& tab = st.get<int>("tab");
+//       State<int>& tabSt = st.get<int>(tab);
 //       return skiff::VStack({ ... });
 //   });
 //   // 启动前:
@@ -37,37 +36,39 @@ namespace components {
 
 // StateView:持有并集中管理一个页面的所有 State。
 //
-//   create<T>(name, initial) —— 创建页面状态,本体由 StateView 持有
-//   addRef<T>(name, state)   —— 注册外部持有的状态(仅管理其绑定)
-//   get<T>(name)             —— 按名字取用(类型须与创建时一致)
-//   bindAll(app)             —— 把所有状态一次性绑定到 App
+//   create<T>(id, initial) —— 创建页面状态,本体由 StateView 持有
+//   addRef<T>(id, state)   —— 注册外部持有的状态(仅管理其绑定)
+//   get<T>(id)             —— 按键取用(类型须与创建时一致)
+//   bindAll(app)           —— 把所有状态一次性绑定到 App
+//
+// 键是 int(业务层用枚举)。唯一性只在本 StateView 内:全局一份、每页一份,
+// 不同页面的枚举都可以从 0 起,互不冲突。
 class StateView {
 public:
     // 创建并持有一个页面状态;返回的引用在 StateView 存活期间有效
     template <typename T>
-    State<T>& create(const std::string& name, const T& initial) {
-        TypedEntry<T>* e = new TypedEntry<T>(name, initial);
+    State<T>& create(int id, const T& initial) {
+        TypedEntry<T>* e = new TypedEntry<T>(id, initial);
         entries_.push_back(std::unique_ptr<Entry>(e));
         return *e->state;
     }
 
     // 注册一个外部持有的状态(如全局导航状态),StateView 不持有本体
     template <typename T>
-    void addRef(const std::string& name, State<T>& s) {
-        entries_.push_back(std::unique_ptr<Entry>(new TypedEntry<T>(name, s)));
+    void addRef(int id, State<T>& s) {
+        entries_.push_back(std::unique_ptr<Entry>(new TypedEntry<T>(id, s)));
     }
 
-    // 按名字取用状态;找不到或类型不匹配直接终止(编程错误,尽早暴露)
+    // 按键取用状态;找不到或类型不匹配直接终止(编程错误,尽早暴露)
     template <typename T>
-    State<T>& get(const std::string& name) {
+    State<T>& get(int id) {
         for (size_t i = 0; i < entries_.size(); ++i) {
-            if (entries_[i]->name == name) {
+            if (entries_[i]->id == id) {
                 TypedEntry<T>* t = dynamic_cast<TypedEntry<T>*>(entries_[i].get());
                 if (t != nullptr) return *t->state;
             }
         }
-        std::fprintf(stderr, "StateView: state '%s' not found or type mismatch\n",
-                     name.c_str());
+        std::fprintf(stderr, "StateView: state %d not found or type mismatch\n", id);
         std::abort();
     }
 
@@ -77,7 +78,7 @@ public:
 
 private:
     struct Entry {
-        std::string name;
+        int id;
         virtual ~Entry() {}
         virtual void bind(App&) = 0;
     };
@@ -87,10 +88,10 @@ private:
     struct TypedEntry : Entry {
         State<T>* state;
         bool owned;
-        TypedEntry(const std::string& n, const T& v)
-            : state(new State<T>(v)), owned(true) { name = n; }
-        TypedEntry(const std::string& n, State<T>& s)
-            : state(&s), owned(false) { name = n; }
+        TypedEntry(int n, const T& v)
+            : state(new State<T>(v)), owned(true) { id = n; }
+        TypedEntry(int n, State<T>& s)
+            : state(&s), owned(false) { id = n; }
         ~TypedEntry() { if (owned) delete state; }
         void bind(App& app) override { app.bind(*state); }
     };
@@ -107,24 +108,24 @@ struct StateDef {
 //   标签(配合 AppUi::globalStatesInit):
 //     state::BOOL / state::INT / state::STRING
 //   StateDef 工厂(配合 PageView/Router 的 { ... } 状态列表):
-//     state::of<T>("名", 初值)   本页状态,StateView 持有
-//     state::ref("名", 外部状态)  仅注册引用
+//     state::of<T>(id, 初值)   本页状态,StateView 持有;id 为 int(枚举)
+//     state::ref(id, 外部状态)  仅注册引用
 struct state {
     enum Tag { BOOL, INT, STRING };
 
     // 声明一个本页状态(本体由 StateView 持有)
     template <typename T>
-    static StateDef of(const std::string& name, const T& initial) {
+    static StateDef of(int id, const T& initial) {
         StateDef d;
-        d.apply = [name, initial](StateView& sv) { sv.create<T>(name, initial); };
+        d.apply = [id, initial](StateView& sv) { sv.create<T>(id, initial); };
         return d;
     }
 
     // 声明一个外部状态引用(如全局导航状态)
     template <typename T>
-    static StateDef ref(const std::string& name, State<T>& s) {
+    static StateDef ref(int id, State<T>& s) {
         StateDef d;
-        d.apply = [name, &s](StateView& sv) { sv.addRef(name, s); };
+        d.apply = [id, &s](StateView& sv) { sv.addRef(id, s); };
         return d;
     }
 };

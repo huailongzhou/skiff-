@@ -78,9 +78,10 @@ if(SKIFF_BACKEND_LVGL)
         target_link_libraries(physics_sdl PRIVATE skiff_lvgl_sdl3 box2d)
 
         # pnd_sdl.cpp 现在是平台无关的 UI 定义,没有 main,
-        # 平台入口在 platforms/<平台>/ 下。
+        # 平台入口在 platforms/<平台>/ 下;pnd_platform.cpp 是 MusicSink 适配。
+        set(PND_PLATFORM_SRC ${CMAKE_CURRENT_SOURCE_DIR}/examples/pnd_platform.cpp)
         if(APPLE)
-            add_executable(pnd_mac platforms/mac/mac_platform.cpp)
+            add_executable(pnd_mac platforms/mac/mac_platform.cpp ${PND_PLATFORM_SRC})
             target_include_directories(pnd_mac PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
             target_link_libraries(pnd_mac PRIVATE skiff_lvgl_sdl3 box2d)
             target_link_libraries(pnd_mac PRIVATE
@@ -88,12 +89,12 @@ if(SKIFF_BACKEND_LVGL)
                 "-framework CoreGraphics")
         endif()
         if(WIN32)
-            add_executable(pnd_win platforms/win/win_platform.cpp)
+            add_executable(pnd_win platforms/win/win_platform.cpp ${PND_PLATFORM_SRC})
             target_include_directories(pnd_win PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
             target_link_libraries(pnd_win PRIVATE skiff_lvgl_sdl3 box2d winmm)
         endif()
         if(UNIX AND NOT APPLE)
-            add_executable(pnd_linux platforms/linux/linux_platform.cpp)
+            add_executable(pnd_linux platforms/linux/linux_platform.cpp ${PND_PLATFORM_SRC})
             target_include_directories(pnd_linux PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
             target_link_libraries(pnd_linux PRIVATE skiff_lvgl_sdl3 box2d mpg123)
         endif()

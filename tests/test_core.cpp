@@ -287,16 +287,17 @@ static void test_router_fallback() {
 // ---- StateView:创建 / 引用外部状态 ----
 static void test_stateview() {
     comp::StateView sv;
-    skiff::State<int>& a = sv.create<int>("a", 3);
+    enum { kA = 0, kExt };
+    skiff::State<int>& a = sv.create<int>(kA, 3);
     CHECK(a.get() == 3);
     a.set(5);
-    CHECK(sv.get<int>("a").get() == 5);
+    CHECK(sv.get<int>(kA).get() == 5);
 
     skiff::State<std::string> ext("ext");
-    sv.addRef<std::string>("ext", ext);
-    CHECK(sv.get<std::string>("ext").get() == "ext");
+    sv.addRef<std::string>(kExt, ext);
+    CHECK(sv.get<std::string>(kExt).get() == "ext");
     ext.set("changed");
-    CHECK(sv.get<std::string>("ext").get() == "changed");
+    CHECK(sv.get<std::string>(kExt).get() == "changed");
 }
 
 // ---- TabView:空页签列表不崩溃 ----

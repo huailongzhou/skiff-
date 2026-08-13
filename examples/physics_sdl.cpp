@@ -9,6 +9,7 @@
 #include "app_core/physics_scene.hpp"
 #include "app_core/scene_host.hpp"
 #include "physics_draw.hpp"
+#include "pnd_state.hpp"
 #include "skiff/skiff.hpp"
 #include "skiff_lvgl.hpp"
 #include "skiff_lvgl_sdl3.hpp"
@@ -35,13 +36,13 @@ skiff::ElementView toolBtn(const char* label, std::function<void()> onTap) {
 void syncPhysicsUi(skiff::components::PageView& page, const app::PhysicsScene& scene) {
     skiff::components::StateView& st = page.stateView();
     const int frame = (int)scene.frame();
-    skiff::State<int>& frameSt = st.get<int>("frame");
+    skiff::State<int>& frameSt = st.get<int>(pnd::phys::frame);
     if (frameSt.get() != frame) frameSt.set(frame);
     const bool paused = scene.paused();
-    skiff::State<bool>& pausedSt = st.get<bool>("paused");
+    skiff::State<bool>& pausedSt = st.get<bool>(pnd::phys::paused);
     if (pausedSt.get() != paused) pausedSt.set(paused);
     const int shape = scene.dropCircle() ? 1 : 0;
-    skiff::State<int>& shapeSt = st.get<int>("shape");
+    skiff::State<int>& shapeSt = st.get<int>(pnd::phys::shape);
     if (shapeSt.get() != shape) shapeSt.set(shape);
 }
 
@@ -59,18 +60,18 @@ int main(int argc, char** argv) {
     host.activate("physics");
 
     skiff::components::PageView page("physics", {
-        skiff::components::state::of<int>("frame", 0),
-        skiff::components::state::of<bool>("paused", false),
-        skiff::components::state::of<int>("shape", 0),
+        skiff::components::state::of<int>(pnd::phys::frame, 0),
+        skiff::components::state::of<bool>(pnd::phys::paused, false),
+        skiff::components::state::of<int>(pnd::phys::shape, 0),
     });
     scene.onChange([&page, &scene] { syncPhysicsUi(page, scene); });
 
     skiff::lvgl::LvglBackend backend(lv_scr_act());
     skiff::App app(backend, [&page, &scene]() -> skiff::Element {
         return page.render([&scene](skiff::components::StateView& st) -> skiff::Element {
-            skiff::State<int>& frame = st.get<int>("frame");
-            skiff::State<bool>& paused = st.get<bool>("paused");
-            skiff::State<int>& shape = st.get<int>("shape");
+            skiff::State<int>& frame = st.get<int>(pnd::phys::frame);
+            skiff::State<bool>& paused = st.get<bool>(pnd::phys::paused);
+            skiff::State<int>& shape = st.get<int>(pnd::phys::shape);
 
             return skiff::VStack({
                 skiff::HStack({

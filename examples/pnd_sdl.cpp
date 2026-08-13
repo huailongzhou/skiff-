@@ -5,13 +5,14 @@
 // 文案经 pnd_i18n(业务) + skiff::i18n(框架);路由使用稳定英文 ID。
 #include <chrono>
 #include <cstdio>
-#include <cstdlib>
 #include <ctime>
 #include <functional>
 #include <string>
 
 #include "skiff/skiff.hpp"
 #include "pnd_i18n.hpp"
+#include "pnd_state.hpp"
+#include "pnd_platform.hpp"
 #include "app_core/music_scene.hpp"
 #include "app_core/physics_scene.hpp"
 #include "app_core/scene_host.hpp"
@@ -104,7 +105,7 @@ Element physicsToolBtn(const std::string& label, std::function<void()> onTap) {
 
 Element topMenuOverlay(State<bool>& menuExpanded, State<int>& brightness,
                        skiff::components::Router& router,
-                       skiff::Platform& platform) {
+                       std::function<void(int)> onBrightness) {
     const int menuItemH = 64;
     return skiff::components::DropDown(menuExpanded)
         .layout(skiff::layout::hstack({
@@ -128,10 +129,9 @@ Element topMenuOverlay(State<bool>& menuExpanded, State<int>& brightness,
             },
             {
                 {SKIFF_TR(app_brightness), 0, 100, brightness,
-                 [&platform, &brightness](int v) {
+                 [&brightness, onBrightness](int v) {
                      brightness.set(v);
-                     platform.invokeExternal("setBrightness",
-                                            {std::to_string(v)});
+                     onBrightness(v);
                  }},
             }
         })
@@ -304,47 +304,34 @@ namespace skiff {
 namespace demo {
 
 // PND 风格主页的 UI:继承 AppUi 获得 platform/router/states 能力,
-// 这里只写 PND 特有的部分(能力声明、事件订阅、页面与下拉菜单)。
+// 这里只写 PND 特有的部分(页面与下拉菜单)。
 class PndUi : public components::AppUi {
 public:
     explicit PndUi(Platform& platform)
         : components::AppUi(platform, "home"),
           musicSink_(platform),
+          display_(platform),
           physics_(kPhysCanvasW, kPhysCanvasH),
           physicsPage_(0),
           musicPage_(0) {
         tickLast_ = std::chrono::steady_clock::now();
         music_.setSink(&musicSink_);
+        pnd::bindPlatform(platform, music_);
         scenes_.add(physics_);
         pnd::i18n::init("zh-CN");
         // 注册全局状态(由 StateView 持有,bindAll 一次性绑定)
         globalStatesInit(skiff::components::state::BOOL, {
-            {"menuExpanded", false},
-            {"musicPlaying", false},
+            {pnd::g::menuExpanded, false},
+            {pnd::g::musicPlaying, false},
         });
         globalStatesInit(skiff::components::state::INT, {
-            {"brightness", 80},
-            {"musicProgress", 0},
-            {"mediaCategory", 0},
+            {pnd::g::brightness, 80},
+            {pnd::g::musicProgress, 0},
+            {pnd::g::mediaCategory, 0},
         });
         globalStatesInit(skiff::components::state::STRING, {
-            {"currentTrack", music_.current().path},
-            {"locale", "zh-CN"},
-        });
-        // 声明需要的平台能力,具体实现由平台入口注册
-        platform.declare("setBrightness");
-        platform.declare("setVolume");
-        platform.declare("playMusic");
-        platform.declare("stopMusic");
-        platform.declare("openFile");
-        // 平台播放器 → 场景(再投影到 UI)
-        platform.on("musicProgress", [this](const std::vector<std::string>& args) {
-            if (!args.empty()) {
-                music_.setProgressFromOutput(std::atoi(args[0].c_str()));
-            }
-        });
-        platform.on("musicEnded", [this](const std::vector<std::string>&) {
-            music_.onPlaybackEnded();
+            {pnd::g::currentTrack, music_.current().path},
+            {pnd::g::locale, "zh-CN"},
         });
         setupPages_();
         setupOverlay_();
@@ -353,7 +340,7 @@ public:
     }
 
     void toggleMenu() {
-        State<bool>& e = states().get<bool>("menuExpanded");
+        State<bool>& e = states().get<bool>(pnd::g::menuExpanded);
         e.set(!e.get());
     }
 
@@ -373,18 +360,18 @@ public:
 private:
     void applyLocale_(const std::string& next) {
         skiff::i18n::setLocale(next);
-        states().get<std::string>("locale").set(next);
+        states().get<std::string>(pnd::g::locale).set(next);
     }
 
     void setupPages_() {
         auto musicBody = [this](components::StateView& st) -> Element {
-            State<int>& musicProgress_ = states().get<int>("musicProgress");
-            State<bool>& musicPlaying_ = states().get<bool>("musicPlaying");
+            State<int>& musicProgress_ = states().get<int>(pnd::g::musicProgress);
+            State<bool>& musicPlaying_ = states().get<bool>(pnd::g::musicPlaying);
             State<std::string>& currentTrack_ =
-                states().get<std::string>("currentTrack");
-            State<bool>& shuffle_ = st.get<bool>("shuffle");
-            State<int>& repeat_ = st.get<int>("repeat");
-            State<int>& volume_ = st.get<int>("volume");
+                states().get<std::string>(pnd::g::currentTrack);
+            State<bool>& shuffle_ = st.get<bool>(pnd::music::shuffle);
+            State<int>& repeat_ = st.get<int>(pnd::music::repeat);
+            State<int>& volume_ = st.get<int>(pnd::music::volume);
 
             Element album = skiff::Watch(currentTrack_, [this](const std::string&) {
                 return musicAlbumArt(music_.current());
@@ -477,7 +464,7 @@ private:
         };
 
         auto mediaBody = [this](components::StateView&) -> Element {
-            State<int>& category_ = states().get<int>("mediaCategory");
+            State<int>& category_ = states().get<int>(pnd::g::mediaCategory);
 
             auto makeList = [this](const std::vector<skiff::components::ListItem>& items) -> Element {
                 return skiff::components::List(items)
@@ -543,9 +530,9 @@ private:
         };
 
         auto physicsBody = [this](components::StateView& st) -> Element {
-            State<int>& frame = st.get<int>("frame");
-            State<bool>& paused = st.get<bool>("paused");
-            State<int>& shape = st.get<int>("shape");
+            State<int>& frame = st.get<int>(pnd::phys::frame);
+            State<bool>& paused = st.get<bool>(pnd::phys::paused);
+            State<int>& shape = st.get<int>(pnd::phys::shape);
 
             Element canvas = skiff::Watch(frame, [this](int) -> Element {
                 return skiff::Canvas(kPhysCanvasW, kPhysCanvasH,
@@ -650,9 +637,9 @@ private:
         };
 
         auto settingsBody = [this](components::StateView& st) -> Element {
-            State<int>& tab = st.get<int>("tab");
-            State<int>& brightness = states().get<int>("brightness");
-            State<std::string>& locale = states().get<std::string>("locale");
+            State<int>& tab = st.get<int>(pnd::settings::tab);
+            State<int>& brightness = states().get<int>(pnd::g::brightness);
+            State<std::string>& locale = states().get<std::string>(pnd::g::locale);
 
             return skiff::VStack({
                 skiff::components::TopNav({
@@ -667,8 +654,7 @@ private:
                     {SKIFF_TR(settings_display), skiff::Watch(brightness, [this, &brightness](int v) {
                         return displaySubmenu(v, [this, &brightness](int n) {
                             brightness.set(n);
-                            platform().invokeExternal("setBrightness",
-                                                     {std::to_string(n)});
+                            display_.setBrightness(n);
                         });
                     })},
                     {SKIFF_TR(settings_sound), soundSubmenu()},
@@ -735,28 +721,28 @@ private:
 
         router().add("home", {}, homeBody);
         musicPage_ = &router().add("music", {
-            skiff::components::state::of<bool>("shuffle", false),
-            skiff::components::state::of<int>("repeat", 0),
-            skiff::components::state::of<int>("volume", 70),
+            skiff::components::state::of<bool>(pnd::music::shuffle, false),
+            skiff::components::state::of<int>(pnd::music::repeat, 0),
+            skiff::components::state::of<int>(pnd::music::volume, 70),
         }, musicBody);
         router().add("games", {}, gamesBody);
         physicsPage_ = &router().add("physics", {
-            skiff::components::state::of<int>("frame", 0),
-            skiff::components::state::of<bool>("paused", false),
-            skiff::components::state::of<int>("shape", 0),
+            skiff::components::state::of<int>(pnd::phys::frame, 0),
+            skiff::components::state::of<bool>(pnd::phys::paused, false),
+            skiff::components::state::of<int>(pnd::phys::shape, 0),
         }, physicsBody);
         router().add("media", {}, mediaBody);
         router().add("apps", {}, appGridBody);
         router().add("settings", {
-            skiff::components::state::of<int>("tab", 0),
+            skiff::components::state::of<int>(pnd::settings::tab, 0),
         }, settingsBody);
         router().fallback([this]() -> Element { return subPage(router()); });
     }
 
     void setupOverlay_() {
         router().setOverlayBuilder([this]() -> std::vector<Element> {
-            State<bool>& menuExpanded = states().get<bool>("menuExpanded");
-            State<int>& brightness = states().get<int>("brightness");
+            State<bool>& menuExpanded = states().get<bool>(pnd::g::menuExpanded);
+            State<int>& brightness = states().get<int>(pnd::g::brightness);
             std::vector<Element> out;
             out.push_back(skiff::Watch(menuExpanded, [this, &brightness](bool expanded) -> Element {
                 if (!expanded) {
@@ -766,14 +752,15 @@ private:
                 }
                 return skiff::VStack({
                     skiff::TapArea([this] {
-                        states().get<bool>("menuExpanded").set(false);
+                        states().get<bool>(pnd::g::menuExpanded).set(false);
                     })
                         .sizePct(100, 100)
                         .floating(),
                     skiff::Watch(brightness, [this](int) -> Element {
-                        return topMenuOverlay(states().get<bool>("menuExpanded"),
-                                              states().get<int>("brightness"),
-                                              router(), platform());
+                        return topMenuOverlay(states().get<bool>(pnd::g::menuExpanded),
+                                              states().get<int>(pnd::g::brightness),
+                                              router(),
+                                              [this](int v) { display_.setBrightness(v); });
                     }),
                 }, 0)
                     .sizePct(100, 100)
@@ -787,50 +774,38 @@ private:
         if (!physicsPage_) return;
         components::StateView& st = physicsPage_->stateView();
         const int frame = (int)physics_.frame();
-        State<int>& frameSt = st.get<int>("frame");
+        State<int>& frameSt = st.get<int>(pnd::phys::frame);
         if (frameSt.get() != frame) frameSt.set(frame);
         const bool paused = physics_.paused();
-        State<bool>& pausedSt = st.get<bool>("paused");
+        State<bool>& pausedSt = st.get<bool>(pnd::phys::paused);
         if (pausedSt.get() != paused) pausedSt.set(paused);
         const int shape = physics_.dropCircle() ? 1 : 0;
-        State<int>& shapeSt = st.get<int>("shape");
+        State<int>& shapeSt = st.get<int>(pnd::phys::shape);
         if (shapeSt.get() != shape) shapeSt.set(shape);
     }
 
     void syncMusicUi_() {
-        State<std::string>& track = states().get<std::string>("currentTrack");
+        State<std::string>& track = states().get<std::string>(pnd::g::currentTrack);
         if (track.get() != music_.current().path) {
             track.set(music_.current().path);
         }
-        State<bool>& playing = states().get<bool>("musicPlaying");
+        State<bool>& playing = states().get<bool>(pnd::g::musicPlaying);
         if (playing.get() != music_.playing()) playing.set(music_.playing());
-        State<int>& progress = states().get<int>("musicProgress");
+        State<int>& progress = states().get<int>(pnd::g::musicProgress);
         if (progress.get() != music_.progress()) progress.set(music_.progress());
         if (!musicPage_) return;
         components::StateView& st = musicPage_->stateView();
-        State<bool>& shuffle = st.get<bool>("shuffle");
+        State<bool>& shuffle = st.get<bool>(pnd::music::shuffle);
         if (shuffle.get() != music_.shuffle()) shuffle.set(music_.shuffle());
         const int repeat = music_.repeat() ? 1 : 0;
-        State<int>& repeatSt = st.get<int>("repeat");
+        State<int>& repeatSt = st.get<int>(pnd::music::repeat);
         if (repeatSt.get() != repeat) repeatSt.set(repeat);
-        State<int>& volume = st.get<int>("volume");
+        State<int>& volume = st.get<int>(pnd::music::volume);
         if (volume.get() != music_.volume()) volume.set(music_.volume());
     }
 
-    struct PlatformMusicSink : app::MusicSink {
-        explicit PlatformMusicSink(Platform& p) : platform_(p) {}
-        void play(const char* path) {
-            platform_.invokeLater("stopMusic", {});
-            if (path) platform_.invokeLater("playMusic", {std::string(path)});
-        }
-        void stop() { platform_.invokeLater("stopMusic", {}); }
-        void setVolume(int percent) {
-            platform_.invokeLater("setVolume", {std::to_string(percent)});
-        }
-        Platform& platform_;
-    };
-
-    PlatformMusicSink musicSink_;
+    pnd::PlatformMusicSink musicSink_;
+    pnd::PlatformDisplay display_;
     app::MusicScene music_;
     app::SceneHost scenes_;
     app::PhysicsScene physics_;

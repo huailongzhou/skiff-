@@ -5,7 +5,7 @@
 // 用法:
 //   skiff::components::Router router("home");        // 初始路由,也是主页
 //   router.add("home", {}, homeBody);
-//   router.add("设置", { state::of<int>("tab", 0) }, settingsBody);
+//   router.add("设置", { state::of<int>(tab, 0) }, settingsBody);
 //   // App 的 body 里:
 //   return router.render();
 //   // 启动前一次性绑定所有页面的状态:

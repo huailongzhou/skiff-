@@ -6,7 +6,7 @@
 //   3. states_   —— 全局状态(StateView,注册 + 一次性 bindAll)
 //
 // 具体应用 UI(如 PndUi)继承它,在构造函数里:
-//   states().create<T>("名字", 初值)   注册全局状态
+//   states().create<T>(id, 初值)     注册全局状态(id 为 int,业务层用枚举)
 //   platform.declare(...) / platform.on(...)  声明能力、订阅事件
 //   router().add(...)                注册页面
 // 平台入口处的调用不变:ui.render() / ui.bind(app)。
@@ -59,15 +59,15 @@ public:
         app.setTick([this] { tick(); });
     }
 
-    // 批量注册全局状态:类型标签 + {名字, 初值} 列表,如:
+    // 批量注册全局状态:类型标签 + {键, 初值} 列表,如:
     //   globalStatesInit(skiff::components::state::BOOL,
-    //                    {{"menuExpanded", false}, {"musicPlaying", false}});
+    //                    {{menuExpanded, false}, {musicPlaying, false}});
     //   globalStatesInit(skiff::components::state::INT,
-    //                    {{"brightness", 80}});
-    // 标签与初值类型不匹配属于编程错误,直接终止。
+    //                    {{brightness, 80}});
+    // 键是 int(业务层用枚举)。标签与初值类型不匹配属于编程错误,直接终止。
     void globalStatesInit(state::Tag tag,
-                          std::initializer_list<std::pair<std::string, StateInit> > s) {
-        for (std::initializer_list<std::pair<std::string, StateInit> >::iterator
+                          std::initializer_list<std::pair<int, StateInit> > s) {
+        for (std::initializer_list<std::pair<int, StateInit> >::iterator
                  it = s.begin(); it != s.end(); ++it) {
             requireTag(it->second.tag, tag);
             switch (tag) {

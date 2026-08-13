@@ -26,7 +26,9 @@ examples/               示例
   physics_sdl       SDL3 窗口:Canvas + Box2D 物理模拟
   physics_draw      UI 侧 Canvas 调试绘制(把 Box2D debugDraw 接到 Canvas)
   pnd_sdl           平台无关的车机 PND UI 定义(无 main,被平台入口包含)
+  pnd_platform      PND 设备适配(MusicSink / 亮度 → Platform)
   pnd_i18n          PND 业务文案(枚举 + 中英目录)
+  pnd_state         PND UI 状态键(全局/各页枚举,对应 StateView 的 int)
   freetype_check    FreeType / 字体覆盖检查
 platforms/              平台入口(挂载 PND UI + 注册平台能力)
   mac/              pnd_mac(macOS:afplay 音乐 / DisplayServices 亮度)
