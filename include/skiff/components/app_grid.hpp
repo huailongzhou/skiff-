@@ -6,11 +6,11 @@
 //   AppGrid(apps)
 //       .cols(4).rows(3)
 //       .horizontal()
-//       .pageSize(800, 400)
+//       .pageSize(w, h)   // 可选;不设则按 .size() / 占满父容器
 //       .iconSize(40)
 //       .labelSize(16)
 //       .ttf(kFont, 16)
-//       .size(800, 400)
+//       .sizePct(100, 100)
 #pragma once
 
 #include <functional>
@@ -24,7 +24,7 @@ namespace components {
 
 struct AppIcon {
     const char* icon;                // 图标:可以是 LVGL 符号字体或任意 UTF-8 文本
-    std::string label;               // 应用名称(支持 i18n::tr 结果)
+    std::string label;               // 应用名称(支持 SKIFF_TR 结果)
     std::function<void()> onTap;     // 点击回调
 };
 
@@ -39,7 +39,7 @@ struct AppGridOptions {
 
     AppGridOptions()
         : cols_(4), rows_(3), horizontal_(true),
-          pageW_(800), pageH_(400),
+          pageW_(0), pageH_(0),
           hSpacing_(16), vSpacing_(24),
           iconSize_(40), labelSize_(16),
           iconColor_(0xFFFFFF), labelColor_(0xFFFFFF) {}
@@ -89,17 +89,18 @@ public:
             (static_cast<int>(apps_.size()) + perPage - 1) / perPage;
 
         const int padding = e_->options.paddingPx;
-        const int pageW = gridOpts_.pageW_;
-        const int pageH = gridOpts_.pageH_;
+        const int pageW = gridOpts_.pageW_ > 0 ? gridOpts_.pageW_ : e_->options.width;
+        const int pageH = gridOpts_.pageH_ > 0 ? gridOpts_.pageH_ : e_->options.height;
+        const bool usePx = pageW > 0 && pageH > 0;
         const int hSpacing = gridOpts_.hSpacing_;
         const int vSpacing = gridOpts_.vSpacing_;
 
-        const int availW = pageW - 2 * padding;
-        const int availH = pageH - 2 * padding;
-        const int cellW = gridOpts_.cols_ > 0
+        const int availW = usePx ? pageW - 2 * padding : 0;
+        const int availH = usePx ? pageH - 2 * padding : 0;
+        const int cellW = (usePx && gridOpts_.cols_ > 0)
                               ? (availW - (gridOpts_.cols_ - 1) * hSpacing) / gridOpts_.cols_
                               : availW;
-        const int cellH = gridOpts_.rows_ > 0
+        const int cellH = (usePx && gridOpts_.rows_ > 0)
                               ? (availH - (gridOpts_.rows_ - 1) * vSpacing) / gridOpts_.rows_
                               : availH;
 
@@ -132,33 +133,39 @@ public:
                         iconText.options.ttfPath = e_->options.ttfPath;
                     }
 
-                    Element item = skiff::Button({iconText, labelText}, app.onTap)
-                        .size(cellW, cellH)
-                        .centered()
-                        .build();
-                    rowItems.push_back(item);
+                    ElementView item = skiff::Button({iconText, labelText}, app.onTap)
+                        .centered();
+                    if (usePx) item.size(cellW, cellH);
+                    else item.expand();
+                    rowItems.push_back(item.build());
                 }
                 if (!rowItems.empty()) {
-                    pageRows.push_back(
-                        skiff::HStack(rowItems, hSpacing)
-                            .size(availW, cellH)
-                            .build());
+                    ElementView row = skiff::HStack(rowItems, hSpacing);
+                    if (usePx) row.size(availW, cellH);
+                    else row.sizePct(100, 0).expand();
+                    pageRows.push_back(row.build());
                 }
             }
 
-            Element page = skiff::VStack(pageRows, vSpacing)
-                .size(pageW, pageH)
-                .pad(padding)
-                .build();
-            pages.push_back(page);
+            ElementView page = skiff::VStack(pageRows, vSpacing).pad(padding);
+            if (usePx) page.size(pageW, pageH);
+            else page.sizePct(100, 100);
+            pages.push_back(page.build());
         }
 
         Element root;
         root.kind = gridOpts_.horizontal_ ? Element::Row : Element::Column;
         root.options = e_->options;
         root.options.spacingPx = 0;
-        root.options.width = pageW;
-        root.options.height = pageH;
+        if (usePx) {
+            root.options.width = pageW;
+            root.options.height = pageH;
+        } else {
+            if (root.options.width <= 0 && root.options.widthPct <= 0)
+                root.options.widthPct = 100;
+            if (root.options.height <= 0 && root.options.heightPct <= 0)
+                root.options.heightPct = 100;
+        }
         root.options.scrollDir = gridOpts_.horizontal_ ? ScrollHorizontal : ScrollVertical;
         root.options.scrollSnap = SnapStart;
         root.children = pages;

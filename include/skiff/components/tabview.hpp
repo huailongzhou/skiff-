@@ -122,7 +122,9 @@ public:
         }
         int active = tab_->get();
         if (active < 0 || active >= (int)items_.size()) active = 0;
-        const int height = e_->options.height > 0 ? e_->options.height : 432;
+        // 指定了像素高度则用它;否则拉满父容器,不默认 432(=480-48)
+        const bool hasPxH = e_->options.height > 0;
+        const int height = hasPxH ? e_->options.height : 0;
 
         // 左侧页签栏
         std::vector<Element> menu;
@@ -164,10 +166,11 @@ public:
         }
         menu.push_back(skiff::Spacer().build());
 
-        Element tabBar = skiff::VStack(menu, tabOpts_.itemSpacing_)
+        ElementView tabBarView = skiff::VStack(menu, tabOpts_.itemSpacing_)
             .size(tabOpts_.menuWidth_, height)
-            .pad(tabOpts_.menuPad_)
-            .build();
+            .pad(tabOpts_.menuPad_);
+        if (!hasPxH) tabBarView.heightPct(100);
+        Element tabBar = tabBarView.build();
 
         // 右侧内容区
         int cur = active;
@@ -180,8 +183,9 @@ public:
         }
 
         ElementView contentWrap = skiff::VStack({content.build()}, 0)
-            .size(0, height)
             .expand();
+        if (hasPxH) contentWrap.size(0, height);
+        else contentWrap.heightPct(100);
 
         for (const auto& opt : bgOptions_) {
             if (opt.p.t != tabview::part::content) continue;

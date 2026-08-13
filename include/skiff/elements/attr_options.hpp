@@ -2,7 +2,7 @@
 //
 // 用法:
 //   auto opts = skiff::elements::attrOptions()
-//       .size(800, 48)
+//       .size(100, 48)
 //       .bg(0x1A222B)
 //       .ttf(kFont, 20);
 //

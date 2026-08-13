@@ -14,7 +14,7 @@
 using skiff::Element;
 using skiff::ElementView;
 using skiff::State;
-using namespace pnd::i18n;  // Key 枚举,供 tr(nav_home) 等使用
+using namespace pnd::i18n;  // Key 枚举,供 SKIFF_TR(nav_home) 等使用
 
 namespace {
 
@@ -86,21 +86,21 @@ Element topMenuOverlay(State<bool>& menuExpanded, State<int>& brightness,
         }))
         .adapter({
             {
-                {tr(app_wifi), [&router, &menuExpanded] {
+                {SKIFF_TR(app_wifi), [&router, &menuExpanded] {
                 menuExpanded.set(false);
                 router.push("wifi");
                 }},
-                {tr(app_bluetooth), [&router, &menuExpanded] {
+                {SKIFF_TR(app_bluetooth), [&router, &menuExpanded] {
                     menuExpanded.set(false);
                     router.push("bluetooth");
                 }},
-                {tr(app_settings), [&router, &menuExpanded] {
+                {SKIFF_TR(app_settings), [&router, &menuExpanded] {
                     menuExpanded.set(false);
                     router.push("settings");
                 }},
             },
             {
-                {tr(app_brightness), 0, 100, brightness,
+                {SKIFF_TR(app_brightness), 0, 100, brightness,
                  [&platform, &brightness](int v) {
                      brightness.set(v);
                      platform.invokeExternal("setBrightness",
@@ -108,7 +108,7 @@ Element topMenuOverlay(State<bool>& menuExpanded, State<int>& brightness,
                  }},
             }
         })
-        .size(480, 0)
+        .widthPct(60)
         .itemHeight(menuItemH)
         .bg(kTile)
         .ttf(kFont, 16)
@@ -126,16 +126,16 @@ Element statusBar() {
         skiff::Text(ICON_BT).font(16).fg(kLo),
         skiff::Text(ICON_WIFI).font(16).fg(kLo),
         skiff::Text(ICON_BATT).font(16).fg(kLo),
-    }, 12).size(776, 24).centered();
+    }, 12).size(0, 24).widthPct(100).centered();
 }
 
 Element subPage(skiff::components::Router& router) {
     return skiff::VStack({
         skiff::Text(pnd::i18n::routeTitle(router.current())).ttf(kFont, 32).fg(kHi),
-        skiff::Text(tr(common_demo)).ttf(kFont, 20).fg(kLo),
-        skiff::Button(tr(nav_back_page), [&router] { router.pop(); })
+        skiff::Text(SKIFF_TR(common_demo)).ttf(kFont, 20).fg(kLo),
+        skiff::Button(SKIFF_TR(nav_back_page), [&router] { router.pop(); })
             .size(220, 64).bg(kTile).ttf(kFont, 20).fg(kHi),
-    }, 18).size(800, 480).bg(kBg).centered();
+    }, 18).sizePct(100, 100).bg(kBg).centered();
 }
 
 Element settingsRow(const std::string& label, const std::string& value) {
@@ -143,32 +143,32 @@ Element settingsRow(const std::string& label, const std::string& value) {
         skiff::Text(label).ttf(kFont, 18).fg(kHi),
         skiff::Spacer(),
         skiff::Text(value).ttf(kFont, 16).fg(kLo),
-    }, 0).size(560, 48).centered();
+    }, 0).size(0, 48).widthPct(100).centered();
 }
 
 Element languageRow(const std::string& locale,
                     const std::function<void(const std::string&)>& onSelect) {
     const bool isEn = locale == "en";
     const std::string next = isEn ? "zh-CN" : "en";
-    const std::string shown = isEn ? tr(settings_lang_en) : tr(settings_lang_zh);
+    const std::string shown = isEn ? SKIFF_TR(settings_lang_en) : SKIFF_TR(settings_lang_zh);
     return skiff::HStack({
-        skiff::Text(tr(settings_language)).ttf(kFont, 18).fg(kHi),
+        skiff::Text(SKIFF_TR(settings_language)).ttf(kFont, 18).fg(kHi),
         skiff::Spacer(),
         skiff::Button(shown, [onSelect, next] { onSelect(next); })
             .size(160, 36).bg(kNavi).ttf(kFont, 16).fg(kHi),
-    }, 0).size(560, 48).centered();
+    }, 0).size(0, 48).widthPct(100).centered();
 }
 
 Element brightnessRow(int brightness, State<int>& brightnessState) {
     return skiff::HStack({
-        skiff::Text(tr(app_brightness)).ttf(kFont, 18).fg(kHi),
+        skiff::Text(SKIFF_TR(app_brightness)).ttf(kFont, 18).fg(kHi),
         skiff::Spacer(),
         skiff::Slider(brightness, 0, 100,
                       [&brightnessState](int v) { brightnessState.set(v); })
             .size(180, 24),
         skiff::Text(std::to_string(brightness) + "%")
             .ttf(kFont, 16).fg(kLo).size(48, 24),
-    }, 12).size(560, 48).centered();
+    }, 12).size(0, 48).widthPct(100).centered();
 }
 
 Element musicTrackLine(const std::string& track) {
@@ -176,7 +176,7 @@ Element musicTrackLine(const std::string& track) {
 }
 
 Element musicStatusLine(bool playing) {
-    return skiff::Text(playing ? tr(music_playing) : tr(music_stopped))
+    return skiff::Text(playing ? SKIFF_TR(music_playing) : SKIFF_TR(music_stopped))
         .ttf(kFont, 14).fg(playing ? kMusic : kLo);
 }
 
@@ -210,42 +210,42 @@ Element musicProgressRow(int progress, State<int>& progressState) {
 
 Element networkSubmenu() {
     return skiff::VStack({
-        settingsRow(tr(settings_wifi), tr(common_connected)),
-        settingsRow(tr(settings_bluetooth), tr(common_on)),
-        settingsRow(tr(settings_mobile_data), tr(common_off)),
-        settingsRow(tr(settings_airplane), tr(common_off)),
-        settingsRow(tr(settings_hotspot), tr(common_not_enabled)),
-    }, 0).size(560, 432).pad(20).bg(kTile);
+        settingsRow(SKIFF_TR(settings_wifi), SKIFF_TR(common_connected)),
+        settingsRow(SKIFF_TR(settings_bluetooth), SKIFF_TR(common_on)),
+        settingsRow(SKIFF_TR(settings_mobile_data), SKIFF_TR(common_off)),
+        settingsRow(SKIFF_TR(settings_airplane), SKIFF_TR(common_off)),
+        settingsRow(SKIFF_TR(settings_hotspot), SKIFF_TR(common_not_enabled)),
+    }, 0).sizePct(100, 100).pad(20).bg(kTile);
 }
 
 Element displaySubmenu(int brightness, State<int>& brightnessState) {
     return skiff::VStack({
         brightnessRow(brightness, brightnessState),
-        settingsRow(tr(settings_auto_brightness), tr(common_on)),
-        settingsRow(tr(settings_night_mode), tr(common_off)),
-        settingsRow(tr(settings_resolution), "800x480"),
-        settingsRow(tr(settings_theme), tr(settings_theme_dark)),
-    }, 0).size(560, 432).pad(20).bg(kTile);
+        settingsRow(SKIFF_TR(settings_auto_brightness), SKIFF_TR(common_on)),
+        settingsRow(SKIFF_TR(settings_night_mode), SKIFF_TR(common_off)),
+        settingsRow(SKIFF_TR(settings_resolution), "800x480"),
+        settingsRow(SKIFF_TR(settings_theme), SKIFF_TR(settings_theme_dark)),
+    }, 0).sizePct(100, 100).pad(20).bg(kTile);
 }
 
 Element soundSubmenu() {
     return skiff::VStack({
-        settingsRow(tr(settings_media_volume), "60%"),
-        settingsRow(tr(settings_navi_volume), "80%"),
-        settingsRow(tr(settings_beep), tr(common_on)),
-        settingsRow(tr(settings_eq), tr(settings_eq_pop)),
-    }, 0).size(560, 432).pad(20).bg(kTile);
+        settingsRow(SKIFF_TR(settings_media_volume), "60%"),
+        settingsRow(SKIFF_TR(settings_navi_volume), "80%"),
+        settingsRow(SKIFF_TR(settings_beep), SKIFF_TR(common_on)),
+        settingsRow(SKIFF_TR(settings_eq), SKIFF_TR(settings_eq_pop)),
+    }, 0).sizePct(100, 100).pad(20).bg(kTile);
 }
 
 Element systemSubmenu(const std::string& locale,
                       const std::function<void(const std::string&)>& onSelectLocale) {
     return skiff::VStack({
-        settingsRow(tr(settings_version), "v1.2.0"),
-        settingsRow(tr(settings_storage), "12GB/32GB"),
+        settingsRow(SKIFF_TR(settings_version), "v1.2.0"),
+        settingsRow(SKIFF_TR(settings_storage), "12GB/32GB"),
         languageRow(locale, onSelectLocale),
-        settingsRow(tr(settings_reset), tr(common_dash)),
-        settingsRow(tr(settings_about), tr(common_dash)),
-    }, 0).size(560, 432).pad(20).bg(kTile);
+        settingsRow(SKIFF_TR(settings_reset), SKIFF_TR(common_dash)),
+        settingsRow(SKIFF_TR(settings_about), SKIFF_TR(common_dash)),
+    }, 0).sizePct(100, 100).pad(20).bg(kTile);
 }
 
 } // namespace
@@ -282,7 +282,7 @@ public:
         // 订阅平台事件(平台 → UI 上报,如播放进度)
         platform.on("musicProgress", [this](const std::vector<std::string>& args) {
             if (!args.empty()) {
-                states().get<int>("musicProgress").set(std::atoi(args[0].c_str()));
+                states().get<int>("musicProgress").set(std::atoi(args[0].c_sSKIFF_TR()));
             }
         });
         platform.on("musicEnded", [this](const std::vector<std::string>&) {
@@ -350,11 +350,11 @@ private:
 
             return skiff::VStack({
                 skiff::components::TopNav({
-                    skiff::components::TopNavView::routerHome(router(), tr(nav_home)).ttf(kFont, 16),
-                    skiff::components::TopNavView::routerPrev(router(), tr(nav_back)).ttf(kFont, 16),
+                    skiff::components::TopNavView::routerHome(router(), SKIFF_TR(nav_home)).ttf(kFont, 16),
+                    skiff::components::TopNavView::routerPrev(router(), SKIFF_TR(nav_back)).ttf(kFont, 16),
                 })
-                .title(skiff::Text(tr(app_music)).ttf(kFont, 20))
-                .size(800, 48)
+                .title(skiff::Text(SKIFF_TR(app_music)).ttf(kFont, 20))
+                .widthPct(100)
                 .bg(0x1A222B),
                 skiff::Spacer(),
                 album,
@@ -365,7 +365,7 @@ private:
                 skiff::Spacer(),
                 progressRow,
                 skiff::Spacer(),
-            }, 0).size(800, 480).bg(kBg).centered();
+            }, 0).sizePct(100, 100).bg(kBg).centered();
         };
 
         auto mediaBody = [this](components::StateView&) -> Element {
@@ -380,7 +380,7 @@ private:
                     .ttf(kFont, 16)
                     .bg(0x1A222B)      // List 容器背景
                     .fg(kHi)
-                    .size(800, 384);
+                    .sizePct(100, 100);
             };
 
             std::vector<skiff::components::ListItem> videoItems = {
@@ -412,17 +412,17 @@ private:
 
             return skiff::VStack({
                 skiff::components::TopNav({
-                    skiff::components::TopNavView::routerHome(router(), tr(nav_home)).ttf(kFont, 16),
-                    skiff::components::TopNavView::routerPrev(router(), tr(nav_back)).ttf(kFont, 16),
+                    skiff::components::TopNavView::routerHome(router(), SKIFF_TR(nav_home)).ttf(kFont, 16),
+                    skiff::components::TopNavView::routerPrev(router(), SKIFF_TR(nav_back)).ttf(kFont, 16),
                 })
-                .title(skiff::Text(tr(app_media)).ttf(kFont, 20))
-                .size(800, 48)
+                .title(skiff::Text(SKIFF_TR(app_media)).ttf(kFont, 20))
+                .widthPct(100)
                 .bg(0x1A222B),
                 skiff::components::TabView({
-                    {tr(media_video),   makeList(videoItems)},
-                    {tr(media_music),   makeList(musicItems)},
-                    {tr(media_image),   makeList(imageItems)},
-                    {tr(media_ebook), makeList(ebookItems)},
+                    {SKIFF_TR(media_video),   makeList(videoItems)},
+                    {SKIFF_TR(media_music),   makeList(musicItems)},
+                    {SKIFF_TR(media_image),   makeList(imageItems)},
+                    {SKIFF_TR(media_ebook), makeList(ebookItems)},
                 }, category_)
                     .as<skiff::components::TabViewView>()
                     .applyBgOption({
@@ -432,8 +432,8 @@ private:
                         {skiff::components::tabview::content(), skiff::elements::state(),           kTile},
                     })
                     .ttf(kFont, 18)
-                    .size(800, 480 - 48),
-            }, 0).size(800, 480).bg(kBg);
+                    .widthPct(100).expand(),
+            }, 0).sizePct(100, 100).bg(kBg);
         };
 
         auto homeBody = [this](components::StateView&) -> Element {
@@ -460,7 +460,7 @@ private:
                 mainRow,
                 skiff::Spacer(),
                 bottomRow,
-            }, 0).size(800, 480).bg(kBg).pad(12).padTop(0);
+            }, 0).sizePct(100, 100).bg(kBg).pad(12).padTop(0);
         };
 
         auto settingsBody = [this](components::StateView& st) -> Element {
@@ -470,19 +470,19 @@ private:
 
             return skiff::VStack({
                 skiff::components::TopNav({
-                    skiff::components::TopNavView::routerHome(router(), tr(nav_home)).ttf(kFont, 16),
-                    skiff::components::TopNavView::routerPrev(router(), tr(nav_back)).ttf(kFont, 16),
+                    skiff::components::TopNavView::routerHome(router(), SKIFF_TR(nav_home)).ttf(kFont, 16),
+                    skiff::components::TopNavView::routerPrev(router(), SKIFF_TR(nav_back)).ttf(kFont, 16),
                 })
-                .title(skiff::Text(tr(app_settings)).ttf(kFont, 20))
-                .size(800, 48)
+                .title(skiff::Text(SKIFF_TR(app_settings)).ttf(kFont, 20))
+                .widthPct(100)
                 .bg(0x1A222B),
                 skiff::components::TabView({
-                    {tr(settings_network), networkSubmenu()},
-                    {tr(settings_display), skiff::Bind(brightness, [&brightness](int v) {
+                    {SKIFF_TR(settings_network), networkSubmenu()},
+                    {SKIFF_TR(settings_display), skiff::Bind(brightness, [&brightness](int v) {
                         return displaySubmenu(v, brightness);
                     })},
-                    {tr(settings_sound), soundSubmenu()},
-                    {tr(settings_system), systemSubmenu(locale.get(), [this](const std::string& next) {
+                    {SKIFF_TR(settings_sound), soundSubmenu()},
+                    {SKIFF_TR(settings_system), systemSubmenu(locale.get(), [this](const std::string& next) {
                         applyLocale_(next);
                     })},
                 }, tab)
@@ -494,8 +494,8 @@ private:
                         {skiff::components::tabview::content(), skiff::elements::state(), 0x000000},
                     })
                     .ttf(kFont, 18)
-                    .size(800, 480 - 48),
-            }, 0).size(800, 480).bg(kBg);
+                    .widthPct(100).expand(),
+            }, 0).sizePct(100, 100).bg(kBg);
         };
 
         auto appGridBody = [this](components::StateView&) -> Element {
@@ -503,43 +503,42 @@ private:
             using skiff::components::AppGrid;
 
             std::vector<AppIcon> apps = {
-                {ICON_GPS,  tr(app_navi),   [this] { router().push("navi"); }},
-                {ICON_PLAY, tr(app_music),   [this] { router().push("music"); }},
-                {ICON_CALL, tr(app_phone_short),   [this] { router().push("phone"); }},
-                {ICON_AUDIO,tr(app_radio), [this] { router().push("radio"); }},
-                {ICON_VIDEO,tr(app_media), [this] { router().push("media"); }},
-                {ICON_IMAGE,tr(app_gallery),   [this] { router().push("gallery"); }},
-                {ICON_SETUP,tr(app_settings),   [this] { router().push("settings"); }},
-                {ICON_WIFI, tr(app_wifi),  [this] { router().push("wifi"); }},
-                {ICON_BT,   tr(app_bluetooth),   [this] { router().push("bluetooth"); }},
-                {ICON_BATT, tr(app_battery),   [this] { router().push("battery"); }},
-                {ICON_GPS,  tr(app_map),   [this] { router().push("map"); }},
-                {ICON_CALL, tr(app_contacts), [this] { router().push("contacts"); }},
-                {ICON_PLAY, tr(app_video),   [this] { router().push("video"); }},
-                {ICON_IMAGE,tr(app_camera),   [this] { router().push("camera"); }},
-                {ICON_AUDIO,tr(app_recorder),   [this] { router().push("recorder"); }},
-                {ICON_SETUP,tr(app_calendar),   [this] { router().push("calendar"); }},
-                {ICON_WIFI, tr(app_weather),   [this] { router().push("weather"); }},
-                {ICON_BATT, tr(app_calculator), [this] { router().push("calculator"); }},
-                {ICON_APPS, tr(app_files),   [this] { router().push("files"); }},
-                {ICON_BT,   tr(app_clock),   [this] { router().push("clock"); }},
+                {ICON_GPS,  SKIFF_TR(app_navi),   [this] { router().push("navi"); }},
+                {ICON_PLAY, SKIFF_TR(app_music),   [this] { router().push("music"); }},
+                {ICON_CALL, SKIFF_TR(app_phone_short),   [this] { router().push("phone"); }},
+                {ICON_AUDIO,SKIFF_TR(app_radio), [this] { router().push("radio"); }},
+                {ICON_VIDEO,SKIFF_TR(app_media), [this] { router().push("media"); }},
+                {ICON_IMAGE,SKIFF_TR(app_gallery),   [this] { router().push("gallery"); }},
+                {ICON_SETUP,SKIFF_TR(app_settings),   [this] { router().push("settings"); }},
+                {ICON_WIFI, SKIFF_TR(app_wifi),  [this] { router().push("wifi"); }},
+                {ICON_BT,   SKIFF_TR(app_bluetooth),   [this] { router().push("bluetooth"); }},
+                {ICON_BATT, SKIFF_TR(app_battery),   [this] { router().push("battery"); }},
+                {ICON_GPS,  SKIFF_TR(app_map),   [this] { router().push("map"); }},
+                {ICON_CALL, SKIFF_TR(app_contacts), [this] { router().push("contacts"); }},
+                {ICON_PLAY, SKIFF_TR(app_video),   [this] { router().push("video"); }},
+                {ICON_IMAGE,SKIFF_TR(app_camera),   [this] { router().push("camera"); }},
+                {ICON_AUDIO,SKIFF_TR(app_recorder),   [this] { router().push("recorder"); }},
+                {ICON_SETUP,SKIFF_TR(app_calendar),   [this] { router().push("calendar"); }},
+                {ICON_WIFI, SKIFF_TR(app_weather),   [this] { router().push("weather"); }},
+                {ICON_BATT, SKIFF_TR(app_calculator), [this] { router().push("calculator"); }},
+                {ICON_APPS, SKIFF_TR(app_files),   [this] { router().push("files"); }},
+                {ICON_BT,   SKIFF_TR(app_clock),   [this] { router().push("clock"); }},
             };
 
             return skiff::VStack({
                 skiff::components::TopNav({
-                    skiff::components::TopNavView::routerHome(router(), tr(nav_home)).ttf(kFont, 16),
-                    skiff::components::TopNavView::routerPrev(router(), tr(nav_back)).ttf(kFont, 16),
+                    skiff::components::TopNavView::routerHome(router(), SKIFF_TR(nav_home)).ttf(kFont, 16),
+                    skiff::components::TopNavView::routerPrev(router(), SKIFF_TR(nav_back)).ttf(kFont, 16),
                 })
-                .title(skiff::Text(tr(app_apps)).ttf(kFont, 20))
-                .size(800, 48)
+                .title(skiff::Text(SKIFF_TR(app_apps)).ttf(kFont, 20))
+                .widthPct(100)
                 .bg(0x1A222B),
                 AppGrid(apps)
                     .cols(2).rows(2)
                     .horizontal()
-                    .pageSize(800, 432)
                     .ttf(kFont, 16)
-                    .size(800, 432)
-            }, 0).size(800, 480).bg(kBg);
+                    .sizePct(100, 100)
+            }, 0).sizePct(100, 100).bg(kBg);
         };
 
         router().add("home", {}, homeBody);

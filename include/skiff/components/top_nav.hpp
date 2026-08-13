@@ -48,7 +48,13 @@ public:
     Element build() const override {
         Element row;
         row.kind = Element::Row;
-        row.options.height = 48;
+        row.options = e_->options;
+        if (row.options.height <= 0 && row.options.heightPct <= 0) {
+            row.options.height = 48;
+        }
+        if (row.options.width <= 0 && row.options.widthPct <= 0) {
+            row.options.widthPct = 100;
+        }
         row.options.center = true;
         row.options.paddingLeft = row.options.paddingRight = 8;
         row.options.spacingPx = 12;
@@ -60,7 +66,7 @@ public:
         return row;
     }
 
-    // ---- 左侧常用按钮工厂(文案由调用方传入,通常 tr(...)) ----
+    // ---- 左侧常用按钮工厂(文案由调用方传入,通常 SKIFF_TR(...)) ----
     static ElementView routerHome(Router& router, const std::string& label) {
         return skiff::Button(label, [&router] { router.home(); })
             .size(140, 36).bg(0x26303B).fg(0xFFFFFF);

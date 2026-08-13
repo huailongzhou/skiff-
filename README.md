@@ -5,7 +5,7 @@
 - 核心后端无关(纯头文件 `include/skiff/`)，换后端不改页面代码
 - 元素:`ElementView` 包装 + `VStack` / `HStack` / `Text` / `Button` / `Spacer` / `Slider` / `TabView` / `TapArea` / `External`
 - 组合组件(纯 DSL):`TopNav`(顶部导航条)、`TabView`(页签菜单 + 内容区)、`AppGrid`(分页应用网格)、`DropDown`(下拉菜单)、`List`(垂直列表)、`Router`(页面栈路由)、`AppUi`(应用 UI 基类)
-- 多国语言框架:`include/skiff/i18n.hpp`（`registerCatalog` / `setLocale` / `t` / 宏 `tr`）
+- 多国语言框架:`include/skiff/i18n.hpp`（`registerCatalog` / `setLocale` / `t` / 宏 `SKIFF_TR`）
 - PND 业务文案:`examples/pnd_i18n.hpp`（枚举 key + 中英表 + `pnd::i18n::init`）
 - 当前后端：**LVGL 8**(嵌入式渲染) + **SDL3**(PC 预览宿主，仅出窗口/输入)
 - 支持 **FreeType 矢量字体**(TTF，任意字号中文)

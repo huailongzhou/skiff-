@@ -261,27 +261,27 @@ inline void init(const char* defaultLocale = "zh-CN") {
 
 // 路由 ID → 展示文案
 inline const std::string& routeTitle(const std::string& routeId) {
-    if (routeId == "navi") return tr(app_navi);
-    if (routeId == "music") return tr(app_music);
-    if (routeId == "phone") return tr(app_phone);
-    if (routeId == "radio") return tr(app_radio);
-    if (routeId == "media") return tr(app_media);
-    if (routeId == "settings") return tr(app_settings);
-    if (routeId == "apps") return tr(app_apps);
-    if (routeId == "wifi") return tr(app_wifi);
-    if (routeId == "bluetooth") return tr(app_bluetooth);
-    if (routeId == "gallery") return tr(app_gallery);
-    if (routeId == "battery") return tr(app_battery);
-    if (routeId == "map") return tr(app_map);
-    if (routeId == "contacts") return tr(app_contacts);
-    if (routeId == "video") return tr(app_video);
-    if (routeId == "camera") return tr(app_camera);
-    if (routeId == "recorder") return tr(app_recorder);
-    if (routeId == "calendar") return tr(app_calendar);
-    if (routeId == "weather") return tr(app_weather);
-    if (routeId == "calculator") return tr(app_calculator);
-    if (routeId == "files") return tr(app_files);
-    if (routeId == "clock") return tr(app_clock);
+    if (routeId == "navi") return SKIFF_TR(app_navi);
+    if (routeId == "music") return SKIFF_TR(app_music);
+    if (routeId == "phone") return SKIFF_TR(app_phone);
+    if (routeId == "radio") return SKIFF_TR(app_radio);
+    if (routeId == "media") return SKIFF_TR(app_media);
+    if (routeId == "settings") return SKIFF_TR(app_settings);
+    if (routeId == "apps") return SKIFF_TR(app_apps);
+    if (routeId == "wifi") return SKIFF_TR(app_wifi);
+    if (routeId == "bluetooth") return SKIFF_TR(app_bluetooth);
+    if (routeId == "gallery") return SKIFF_TR(app_gallery);
+    if (routeId == "battery") return SKIFF_TR(app_battery);
+    if (routeId == "map") return SKIFF_TR(app_map);
+    if (routeId == "contacts") return SKIFF_TR(app_contacts);
+    if (routeId == "video") return SKIFF_TR(app_video);
+    if (routeId == "camera") return SKIFF_TR(app_camera);
+    if (routeId == "recorder") return SKIFF_TR(app_recorder);
+    if (routeId == "calendar") return SKIFF_TR(app_calendar);
+    if (routeId == "weather") return SKIFF_TR(app_weather);
+    if (routeId == "calculator") return SKIFF_TR(app_calculator);
+    if (routeId == "files") return SKIFF_TR(app_files);
+    if (routeId == "clock") return SKIFF_TR(app_clock);
     static const std::string empty;
     return empty;
 }

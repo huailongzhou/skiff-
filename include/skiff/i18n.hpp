@@ -6,7 +6,7 @@
 //   static std::string zh[COUNT] = {"你好", "再见"};
 //   skiff::i18n::registerCatalog("zh-CN", zh, COUNT);
 //   skiff::i18n::setLocale("zh-CN");
-//   skiff::Text(tr(hello));   // 宏:任意整型/枚举 key
+//   skiff::Text(SKIFF_TR(hello));   // 宏:任意整型/枚举 key
 //
 // 返回目录内稳定引用(locale 切换前指针有效)。
 // 切换语言后应触发 UI 重建(如绑定 State locale)。
@@ -92,7 +92,7 @@ inline const std::string& t(int key) {
 } // namespace i18n
 } // namespace skiff
 
-// tr(my_key) → i18n::t(static_cast<int>(my_key)); key 可为应用枚举
-#ifndef tr
-#define tr(key) (::skiff::i18n::t(static_cast<int>(key)))
+// SKIFF_TR(my_key) → i18n::t(static_cast<int>(my_key)); key 可为应用枚举
+#ifndef SKIFF_TR
+#define SKIFF_TR(key) (::skiff::i18n::t(static_cast<int>(key)))
 #endif

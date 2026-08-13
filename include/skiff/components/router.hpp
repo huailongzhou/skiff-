@@ -195,7 +195,7 @@ public:
             std::vector<Element> overlays = overlayBuilder_();
             rootChildren.insert(rootChildren.end(), overlays.begin(), overlays.end());
         }
-        return skiff::VStack(rootChildren, 0).size(800, 480);
+        return skiff::VStack(rootChildren, 0).sizePct(100, 100);
     }
 
     // 把导航状态和所有页面的状态一次性绑定到 App

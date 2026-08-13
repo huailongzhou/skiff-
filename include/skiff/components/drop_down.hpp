@@ -18,7 +18,7 @@
 //       }))
 //       .as<ElementView>().width(240).itemHeight(48).bg(kTile).ttf(kFont, 16);
 //
-//   return VStack({trigger, menu}, 0).size(800, 480);
+//   return VStack({trigger, menu}, 0).sizePct(100, 100);
 #pragma once
 
 #include <algorithm>
@@ -132,7 +132,15 @@ public:
         const int totalRows = computeLayoutRows_(layout_);
         const int totalHeight = totalRows * e_->options.itemHeightPx;
         root.options.width = e_->options.width;
+        root.options.widthPct = e_->options.widthPct;
         root.options.height = totalHeight;
+        root.options.isFloating = e_->options.isFloating;
+        root.options.hAlign = e_->options.hAlign;
+        root.options.animation = e_->options.animation;
+        if (e_->options.hasBg) {
+            root.options.hasBg = true;
+            root.options.bgColor = e_->options.bgColor;
+        }
         return root;
     }
 

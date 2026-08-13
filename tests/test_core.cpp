@@ -278,6 +278,10 @@ static void test_router_fallback() {
     skiff::Element e = r.render();
     CHECK(called);
     CHECK(e.kind == skiff::Element::Column);  // 根容器
+    CHECK(e.options.width == 0);
+    CHECK(e.options.height == 0);
+    CHECK(e.options.widthPct == 100);
+    CHECK(e.options.heightPct == 100);
 }
 
 // ---- StateView:创建 / 引用外部状态 ----
@@ -306,6 +310,27 @@ static void test_tabview_empty() {
                  {{comp::tabview::first(), skiff::elements::state(), 0x112233}})
              .build();
     CHECK(tv.children.empty());  // rebuild 对空列表无操作
+}
+
+// ---- TabView:未指定像素高度时拉满父容器,不默认 432 ----
+static void test_tabview_fills_parent_height() {
+    skiff::State<int> tab(0);
+    std::vector<comp::TabViewItem> items;
+    comp::TabViewItem it;
+    it.title = "一";
+    it.content = skiff::Text("内容一");
+    items.push_back(it);
+
+    skiff::Element tv = comp::TabView(items, tab).build();
+    CHECK(tv.children.size() == 2);
+    CHECK(tv.children[0].options.heightPct == 100);
+    CHECK(tv.children[0].options.height == 0);
+    CHECK(tv.children[1].options.heightPct == 100);
+
+    tv = comp::TabView(items, tab).size(400, 300).build();
+    CHECK(tv.options.height == 300);
+    CHECK(tv.children[0].options.height == 300);
+    CHECK(tv.children[0].options.heightPct == 0);
 }
 
 // ---- TabView:first 部分 Default 背景色必须合并,不覆盖按钮样式 ----
@@ -828,14 +853,14 @@ static void test_i18n() {
 
     skiff::i18n::setLocale("zh-CN");
     CHECK(skiff::i18n::locale() == "zh-CN");
-    CHECK(tr(k_hi) == "你好");
-    CHECK(tr(k_bye) == "再见");
+    CHECK(SKIFF_TR(k_hi) == "你好");
+    CHECK(SKIFF_TR(k_bye) == "再见");
     CHECK(skiff::i18n::t(k_hi) == "你好");
 
     skiff::i18n::setLocale("en");
     CHECK(skiff::i18n::locale() == "en");
-    CHECK(tr(k_hi) == "Hello");
-    CHECK(tr(k_bye) == "Bye");
+    CHECK(SKIFF_TR(k_hi) == "Hello");
+    CHECK(SKIFF_TR(k_bye) == "Bye");
 
     const std::string& a = skiff::i18n::t(k_hi);
     const std::string& b = skiff::i18n::t(k_hi);
@@ -869,6 +894,7 @@ int main() {
     test_router_fallback();
     test_stateview();
     test_tabview_empty();
+    test_tabview_fills_parent_height();
     test_tabview_first_default_bg();
     test_tabview_select_bg();
     test_tabview_bg_precedence();
