@@ -578,6 +578,94 @@ static void test_bind_view() {
     view.invalidate();
     skiff::Element e5 = view.build();
     CHECK(buildCount == 4);
+    CHECK(!e1.options.keyId.empty());
+    CHECK(e1.options.keyId == e5.options.keyId);
+}
+
+// ---- State:多个 subscribe 并存,setOnChange 只替换自己那一档 ----
+static void test_state_multi_subscribe() {
+    skiff::State<int> s(0);
+    int a = 0;
+    int b = 0;
+    int c = 0;
+    uint64_t idA = s.subscribe([&a] { ++a; });
+    s.subscribe([&b] { ++b; });
+    s.setOnChange([&c] { ++c; });
+
+    s.set(1);
+    CHECK(a == 1);
+    CHECK(b == 1);
+    CHECK(c == 1);
+
+    s.setOnChange([&c] { c += 10; });
+    s.set(2);
+    CHECK(a == 2);
+    CHECK(b == 2);
+    CHECK(c == 11);
+
+    s.unsubscribe(idA);
+    s.set(3);
+    CHECK(a == 2);
+    CHECK(b == 3);
+}
+
+// ---- BindView + bindLocal:只 patch 绑定子树,不重跑 body ----
+static void test_bind_local_patch() {
+    TestBackend backend;
+    skiff::State<int> count(0);
+    int buildCount = 0;
+    int bodyCount = 0;
+
+    comp::BindView<int> view(count, [&buildCount](int c) -> skiff::Element {
+        ++buildCount;
+        return skiff::Text(std::to_string(c));
+    });
+
+    skiff::App app(backend, [&bodyCount, &view]() -> skiff::Element {
+        ++bodyCount;
+        return skiff::VStack({
+            view.build(),
+            skiff::Text("static"),
+        }, 0);
+    });
+    app.bind(count);
+    app.bindLocal(view);
+    app.start();
+
+    CHECK(bodyCount == 1);
+    CHECK(buildCount == 1);
+    backend.resetCounts();
+
+    count.set(1);
+    app.update();
+    CHECK(bodyCount == 1);
+    CHECK(buildCount == 2);
+    CHECK(backend.createCount() == 0);
+    CHECK(backend.destroyCount() == 0);
+    CHECK(backend.updateCount() == 1);
+    CHECK(backend.moveCount() == 0);
+}
+
+// ---- 未 bindLocal 时 State 仍触发整页 body + mount ----
+static void test_app_root_invalidate() {
+    TestBackend backend;
+    skiff::State<int> count(0);
+    int bodyCount = 0;
+
+    skiff::App app(backend, [&bodyCount, &count]() -> skiff::Element {
+        ++bodyCount;
+        return skiff::Text(std::to_string(count.get()));
+    });
+    app.bind(count);
+    app.start();
+    CHECK(bodyCount == 1);
+
+    backend.resetCounts();
+    count.set(1);
+    app.update();
+    CHECK(bodyCount == 2);
+    CHECK(backend.createCount() == 0);
+    CHECK(backend.updateCount() >= 1);
 }
 
 // ---- i18n 框架层:注册目录 / 切换语言 / 按下标查找 ----
@@ -632,6 +720,9 @@ int main() {
     test_backend_diff_taparea_callback();
     test_memo_view();
     test_bind_view();
+    test_state_multi_subscribe();
+    test_bind_local_patch();
+    test_app_root_invalidate();
     test_i18n();
 
     if (failures == 0) {

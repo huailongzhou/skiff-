@@ -5,6 +5,7 @@
 // 文案经 pnd_i18n(业务) + skiff::i18n(框架);路由使用稳定英文 ID。
 #include <cstdlib>
 #include <ctime>
+#include <functional>
 #include <memory>
 #include <string>
 
@@ -146,17 +147,16 @@ Element settingsRow(const std::string& label, const std::string& value) {
     }, 0).size(560, 48).centered();
 }
 
-Element languageRow(const std::string& locale, State<std::string>& localeState) {
+Element languageRow(const std::string& locale,
+                    const std::function<void(const std::string&)>& onSelect) {
     const bool isEn = locale == "en";
     const std::string next = isEn ? "zh-CN" : "en";
     const std::string shown = isEn ? tr(settings_lang_en) : tr(settings_lang_zh);
     return skiff::HStack({
         skiff::Text(tr(settings_language)).ttf(kFont, 18).fg(kHi),
         skiff::Spacer(),
-        skiff::Button(shown, [&localeState, next] {
-            skiff::i18n::setLocale(next);
-            localeState.set(next);
-        }).size(160, 36).bg(kNavi).ttf(kFont, 16).fg(kHi),
+        skiff::Button(shown, [onSelect, next] { onSelect(next); })
+            .size(160, 36).bg(kNavi).ttf(kFont, 16).fg(kHi),
     }, 0).size(560, 48).centered();
 }
 
@@ -170,6 +170,43 @@ Element brightnessRow(int brightness, State<int>& brightnessState) {
         skiff::Text(std::to_string(brightness) + "%")
             .ttf(kFont, 16).fg(kLo).size(48, 24),
     }, 12).size(560, 48).centered();
+}
+
+Element musicTrackLine(const std::string& track) {
+    return skiff::Text(track).ttf(kFont, 12).fg(kLo);
+}
+
+Element musicStatusLine(bool playing) {
+    return skiff::Text(playing ? tr(music_playing) : tr(music_stopped))
+        .ttf(kFont, 14).fg(playing ? kMusic : kLo);
+}
+
+Element musicPlayButton(bool playing, skiff::Platform& platform,
+                        State<bool>& playingState,
+                        State<std::string>& trackState) {
+    return skiff::Button({skiff::Text(playing ? ICON_PAUSE : ICON_PLAY)
+                              .font(28).fg(kHi)},
+                         [&platform, &playingState, &trackState] {
+                             if (playingState.get()) {
+                                 platform.invokeExternal("stopMusic", {});
+                                 playingState.set(false);
+                             } else {
+                                 platform.invokeExternal(
+                                     "playMusic", {trackState.get()});
+                                 playingState.set(true);
+                             }
+                         })
+        .size(80, 80).bg(kMusic);
+}
+
+Element musicProgressRow(int progress, State<int>& progressState) {
+    return skiff::HStack({
+        skiff::Slider(progress, 0, 100,
+                      [&progressState](int v) { progressState.set(v); })
+            .size(440, 20),
+        skiff::Text(std::to_string(progress) + "%")
+            .ttf(kFont, 14).fg(kLo).size(40, 20),
+    }, 12).centered();
 }
 
 Element networkSubmenu() {
@@ -201,11 +238,12 @@ Element soundSubmenu() {
     }, 0).size(560, 432).pad(20).bg(kTile);
 }
 
-Element systemSubmenu(const std::string& locale, State<std::string>& localeState) {
+Element systemSubmenu(const std::string& locale,
+                      const std::function<void(const std::string&)>& onSelectLocale) {
     return skiff::VStack({
         settingsRow(tr(settings_version), "v1.2.0"),
         settingsRow(tr(settings_storage), "12GB/32GB"),
-        languageRow(locale, localeState),
+        languageRow(locale, onSelectLocale),
         settingsRow(tr(settings_reset), tr(common_dash)),
         settingsRow(tr(settings_about), tr(common_dash)),
     }, 0).size(560, 432).pad(20).bg(kTile);
@@ -253,7 +291,7 @@ public:
             states().get<int>("musicProgress").set(0);
         });
         setupPages_();
-        setupOverlay_(platform);
+        setupOverlay_();
     }
 
     void toggleMenu() {
@@ -261,10 +299,49 @@ public:
         e.set(!e.get());
     }
 
+    void bind(skiff::App& app) override {
+        components::AppUi::bind(app);
+        bindLocal_(app, brightnessBind_.get());
+        bindLocal_(app, overlayBrightnessBind_.get());
+        bindLocal_(app, overlayBind_.get());
+        bindLocal_(app, musicProgressBind_.get());
+        bindLocal_(app, musicPlayingBind_.get());
+        bindLocal_(app, musicPlayBtnBind_.get());
+        bindLocal_(app, musicTrackBind_.get());
+    }
+
 private:
-    // 细粒度 State->子树绑定:这些子树只在对应 State 变化时重建
+    template <typename T>
+    static void bindLocal_(skiff::App& app, skiff::components::BindView<T>* view) {
+        if (view) app.bindLocal(*view);
+    }
+
+    void invalidateBindViews_() {
+        if (brightnessBind_.get()) brightnessBind_->invalidate();
+        if (overlayBrightnessBind_.get()) overlayBrightnessBind_->invalidate();
+        if (overlayBind_.get()) overlayBind_->invalidate();
+        if (musicProgressBind_.get()) musicProgressBind_->invalidate();
+        if (musicPlayingBind_.get()) musicPlayingBind_->invalidate();
+        if (musicPlayBtnBind_.get()) musicPlayBtnBind_->invalidate();
+        if (musicTrackBind_.get()) musicTrackBind_->invalidate();
+        if (localeBind_.get()) localeBind_->invalidate();
+    }
+
+    void applyLocale_(const std::string& next) {
+        skiff::i18n::setLocale(next);
+        invalidateBindViews_();
+        states().get<std::string>("locale").set(next);
+    }
+
+    // bindLocal 后只 patch 对应节点;localeBind_ 仅作缓存,语言切换仍整页刷新
     std::unique_ptr<skiff::components::BindView<int> > brightnessBind_;
+    std::unique_ptr<skiff::components::BindView<int> > overlayBrightnessBind_;
+    std::unique_ptr<skiff::components::BindView<bool> > overlayBind_;
     std::unique_ptr<skiff::components::BindView<std::string> > localeBind_;
+    std::unique_ptr<skiff::components::BindView<int> > musicProgressBind_;
+    std::unique_ptr<skiff::components::BindView<bool> > musicPlayingBind_;
+    std::unique_ptr<skiff::components::BindView<bool> > musicPlayBtnBind_;
+    std::unique_ptr<skiff::components::BindView<std::string> > musicTrackBind_;
 
     void setupPages_() {
         State<int>& brightnessState = states().get<int>("brightness");
@@ -277,62 +354,71 @@ private:
         State<std::string>& localeState = states().get<std::string>("locale");
         localeBind_.reset(new skiff::components::BindView<std::string>(
             localeState,
-            [this, &localeState](const std::string& l) -> Element {
-                return systemSubmenu(l, localeState);
+            [this](const std::string& l) -> Element {
+                return systemSubmenu(l, [this](const std::string& next) {
+                    applyLocale_(next);
+                });
+            }));
+
+        State<int>& musicProgressState = states().get<int>("musicProgress");
+        musicProgressBind_.reset(new skiff::components::BindView<int>(
+            musicProgressState,
+            [&musicProgressState](int p) -> Element {
+                return musicProgressRow(p, musicProgressState);
+            }));
+
+        State<bool>& musicPlayingState = states().get<bool>("musicPlaying");
+        musicPlayingBind_.reset(new skiff::components::BindView<bool>(
+            musicPlayingState,
+            [](bool playing) -> Element {
+                return musicStatusLine(playing);
+            }));
+        musicPlayBtnBind_.reset(new skiff::components::BindView<bool>(
+            musicPlayingState,
+            [this, &musicPlayingState](bool playing) -> Element {
+                return musicPlayButton(playing, platform(), musicPlayingState,
+                                       states().get<std::string>("currentTrack"));
+            }));
+
+        State<std::string>& currentTrackState =
+            states().get<std::string>("currentTrack");
+        musicTrackBind_.reset(new skiff::components::BindView<std::string>(
+            currentTrackState,
+            [](const std::string& track) -> Element {
+                return musicTrackLine(track);
             }));
 
         auto musicBody = [this](components::StateView&) -> Element {
-            State<std::string>& currentTrack_ = states().get<std::string>("currentTrack");
-            const std::string track = currentTrack_.get();
-            State<bool>& musicPlaying_ = states().get<bool>("musicPlaying");
             State<int>& musicProgress_ = states().get<int>("musicProgress");
-            const bool playing = musicPlaying_.get();
 
-            // 封面
             Element album = skiff::VStack({
                 skiff::Text(ICON_AUDIO).font(56).fg(kHi),
             }).size(150, 150).bg(kMusic).centered();
 
-            // 曲目信息 + 播放状态
             Element trackInfo = skiff::VStack({
                 skiff::Text("sample").ttf(kFont, 22).fg(kHi),
-                skiff::Text(track).ttf(kFont, 12).fg(kLo),
-                skiff::Text(playing ? tr(music_playing) : tr(music_stopped))
-                    .ttf(kFont, 14).fg(playing ? kMusic : kLo),
+                musicTrackBind_->build(),
+                musicPlayingBind_->build(),
             }, 4).centered();
 
-            // 控制按钮:快退 / 播放暂停 / 快进(快退快进演示进度 ±10)
             Element controls = skiff::HStack({
                 skiff::Button({skiff::Text(ICON_PREV).font(24).fg(kLo)},
-                              [this, &musicProgress_] { const int v = musicProgress_.get();
-                                       musicProgress_.set(v > 10 ? v - 10 : 0); })
-                    .size(56, 56).bg(kTile),
-                skiff::Button({skiff::Text(playing ? ICON_PAUSE : ICON_PLAY)
-                                   .font(28).fg(kHi)},
-                              [this, track, &musicPlaying_] {
-                                  if (musicPlaying_.get()) {
-                                      platform().invokeExternal("stopMusic", {});
-                                      musicPlaying_.set(false);
-                                  } else {
-                                      platform().invokeExternal("playMusic", {track});
-                                      musicPlaying_.set(true);
-                                  }
+                              [this, &musicProgress_] {
+                                  const int v = musicProgress_.get();
+                                  musicProgress_.set(v > 10 ? v - 10 : 0);
                               })
-                    .size(80, 80).bg(kMusic),
+                    .size(56, 56).bg(kTile),
+                musicPlayBtnBind_->build(),
                 skiff::Button({skiff::Text(ICON_NEXT).font(24).fg(kLo)},
-                              [this, &musicProgress_] { const int v = musicProgress_.get();
-                                       musicProgress_.set(v < 90 ? v + 10 : 100); })
+                              [this, &musicProgress_] {
+                                  const int v = musicProgress_.get();
+                                  musicProgress_.set(v < 90 ? v + 10 : 100);
+                              })
                     .size(56, 56).bg(kTile),
             }, 32).centered();
 
-            // 进度条 + 百分比
-            Element progressRow = skiff::HStack({
-                skiff::Slider(musicProgress_.get(), 0, 100,
-                              [this, &musicProgress_](int v) { musicProgress_.set(v); })
-                    .size(440, 20),
-                skiff::Text(std::to_string(musicProgress_.get()) + "%")
-                    .ttf(kFont, 14).fg(kLo).size(40, 20),
-            }, 12).centered();
+            // 进度条 + 百分比(BindView:进度变化只 patch 这一行)
+            Element progressRow = musicProgressBind_->build();
 
             return skiff::VStack({
                 skiff::components::TopNav({
@@ -531,19 +617,41 @@ private:
         router().fallback([this]() -> Element { return subPage(router()); });
     }
 
-    void setupOverlay_(Platform& platform) {
-        router().setOverlayBuilder([this, &platform]() -> std::vector<Element> {
-            State<bool>& menuExpanded_ = states().get<bool>("menuExpanded");
-            State<int>& brightness_ = states().get<int>("brightness");
-            if (!menuExpanded_.get()) return {};
-            return {
-                skiff::TapArea([this] {
-                    states().get<bool>("menuExpanded").set(false);
-                })
-                    .sizePct(100, 100)
-                    .floating(),
-                topMenuOverlay(menuExpanded_, brightness_, router(), platform),
-            };
+    void setupOverlay_() {
+        State<bool>& menuExpanded = states().get<bool>("menuExpanded");
+        State<int>& brightnessState = states().get<int>("brightness");
+
+        overlayBrightnessBind_.reset(new skiff::components::BindView<int>(
+            brightnessState,
+            [this](int) -> Element {
+                return topMenuOverlay(states().get<bool>("menuExpanded"),
+                                      states().get<int>("brightness"),
+                                      router(), platform());
+            }));
+
+        overlayBind_.reset(new skiff::components::BindView<bool>(
+            menuExpanded,
+            [this](bool expanded) -> Element {
+                if (!expanded) {
+                    return skiff::VStack(std::vector<Element>(), 0)
+                        .size(0, 0)
+                        .floating();
+                }
+                return skiff::VStack({
+                    skiff::TapArea([this] {
+                        states().get<bool>("menuExpanded").set(false);
+                    })
+                        .sizePct(100, 100)
+                        .floating(),
+                    overlayBrightnessBind_->build(),
+                }, 0)
+                    .floating();
+            }));
+
+        router().setOverlayBuilder([this]() -> std::vector<Element> {
+            std::vector<Element> out;
+            out.push_back(overlayBind_->build());
+            return out;
         });
     }
 };

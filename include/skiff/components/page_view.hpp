@@ -152,7 +152,7 @@ public:
     StateView& stateView() { return stateView_; }
 
     // 渲染页面:执行 body(组件树构建函数)并缓存结果后返回;
-    // 状态变化时 App 会再次调用,得到新的组件树
+    // 未 bindLocal 的状态变化时 App 会再次调用;已 bindLocal 的只 patch 对应节点
     const Element& render(Body body) {
         element_ = body(stateView_);
         return element_;

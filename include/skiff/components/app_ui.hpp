@@ -53,7 +53,7 @@ public:
     Element render() { return router_.render(); }
 
     // 一次性绑定:全局状态 + 所有页面状态 + 路由状态
-    void bind(App& app) {
+    virtual void bind(App& app) {
         states_.bindAll(app);
         router_.bind(app);
     }

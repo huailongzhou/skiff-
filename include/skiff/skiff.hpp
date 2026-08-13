@@ -5,6 +5,7 @@
 #include "element.hpp"
 #include "state.hpp"
 #include "backend.hpp"
+#include "binding.hpp"
 #include "platform.hpp"
 #include "input.hpp"
 #include "layout.hpp"

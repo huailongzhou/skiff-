@@ -7,10 +7,13 @@
 // 等原生操作,节点复用、子节点增删、key 匹配等逻辑由基类统一完成。
 #pragma once
 
+#include <cstddef>
 #include <functional>
+#include <map>
 #include <memory>
 #include <vector>
 
+#include "binding.hpp"
 #include "element.hpp"
 #include "state.hpp"
 
@@ -23,6 +26,9 @@ public:
     // 用一棵新的 Element 树重建/更新整个原生控件树。
     // 通用流程:首次 build,后续 diff,最后调用子类的 afterMount()。
     void mount(const Element& root);
+
+    // 按 key 只更新一棵已挂载子树。找不到对应节点时返回 false(例如该页未显示)。
+    bool patch(const std::string& key, const Element& e);
 
 protected:
     explicit Backend(void* root_parent);
@@ -75,6 +81,7 @@ protected:
     MountedNode* findMatch(std::vector<MountedNode>& old_children,
                            const Element& new_child, size_t preferred_idx,
                            std::vector<bool>& used);
+    MountedNode* findNodeByKey(MountedNode& node, const std::string& key);
     void clearNode(MountedNode& node);
 
     // Button 纯文本时,把 text 合成一个 Text 子节点,避免 diff 时把旧 Text 误判删除。
@@ -96,6 +103,25 @@ inline void Backend::mount(const Element& root) {
         updateNode(root_, root);
     }
     afterMount();
+}
+
+inline Backend::MountedNode* Backend::findNodeByKey(MountedNode& node,
+                                                    const std::string& key) {
+    if (!key.empty() && node.element.options.keyId == key) return &node;
+    for (size_t i = 0; i < node.children.size(); ++i) {
+        MountedNode* found = findNodeByKey(node.children[i], key);
+        if (found) return found;
+    }
+    return nullptr;
+}
+
+inline bool Backend::patch(const std::string& key, const Element& e) {
+    if (key.empty() || root_.graphic_obj == nullptr) return false;
+    MountedNode* n = findNodeByKey(root_, key);
+    if (!n) return false;
+    updateNode(*n, e);
+    afterMount();
+    return true;
 }
 
 inline void Backend::buildNode(const Element& e, void* parent, MountedNode* out) {
@@ -243,32 +269,94 @@ inline bool Backend::isDiffableContainer(const Element& e) {
 class App {
 public:
     App(Backend& backend, std::function<Element()> body)
-        : backend_(backend), body_(std::move(body)), dirty_(true) {}
+        : backend_(backend), body_(std::move(body)), dirty_(true),
+          localDirty_(false) {}
 
-    // 绑定一个状态:它变化时标记界面待刷新。可绑定多个。
+    ~App() {
+        for (size_t i = 0; i < bindings_.size(); ++i) {
+            bindings_[i]->setInvalidator(std::function<void()>());
+            bindings_[i]->setUnregister(std::function<void()>());
+        }
+    }
+
+    // 绑定一个状态:默认整页失效(重跑 body + mount)。
+    // 若该 State 已 bindLocal,则改为只 patch 对应 BindView。
     template <typename T>
     void bind(State<T>& s) {
-        s.setOnChange([this] { invalidate(); });
+        const void* id = static_cast<const void*>(&s);
+        s.subscribe([this, id] {
+            if (isLocalOnly(id)) invalidateLocal();
+            else invalidate();
+        });
+    }
+
+    // 把 BindView 登记为局部订阅:该 State 变化时不重跑 body(),
+    // 只按 bindingKey 更新已挂载子树。须在 start() 之前调用。
+    void bindLocal(Binding& b) {
+        for (size_t i = 0; i < bindings_.size(); ++i) {
+            if (bindings_[i] == &b) return;
+        }
+        bindings_.push_back(&b);
+        ++localOnlyCount_[b.stateIdentity()];
+        b.setInvalidator([this] { invalidateLocal(); });
+        Binding* ptr = &b;
+        b.setUnregister([this, ptr] { removeBinding(ptr); });
     }
 
     // 首次挂载。
     void start() { update(); }
 
-    // 标记待刷新。真正的重建延迟到 update(),
+    // 标记整页待刷新。真正的重建延迟到 update(),
     // 避免在后端的事件回调里边派发事件边删控件。
     void invalidate() { dirty_ = true; }
 
-    // 主循环里定期调用;有失效标记时重新执行 body() 并重建视图树。
+    void invalidateLocal() { localDirty_ = true; }
+
+    // 主循环里定期调用。根失效时重跑 body();仅局部失效时 patch BindView。
     void update() {
-        if (!dirty_) return;
-        dirty_ = false;
-        backend_.mount(body_());
+        if (dirty_) {
+            dirty_ = false;
+            localDirty_ = false;
+            backend_.mount(body_());
+            return;
+        }
+        if (!localDirty_) return;
+        localDirty_ = false;
+        for (size_t i = 0; i < bindings_.size(); ++i) {
+            Binding* b = bindings_[i];
+            if (!b->isDirty()) continue;
+            backend_.patch(b->bindingKey(), b->rebuild());
+        }
     }
 
 private:
+    bool isLocalOnly(const void* id) const {
+        std::map<const void*, int>::const_iterator it = localOnlyCount_.find(id);
+        return it != localOnlyCount_.end() && it->second > 0;
+    }
+
+    void removeBinding(Binding* b) {
+        if (!b) return;
+        for (size_t i = 0; i < bindings_.size(); ++i) {
+            if (bindings_[i] == b) {
+                bindings_.erase(bindings_.begin() + static_cast<std::ptrdiff_t>(i));
+                break;
+            }
+        }
+        const void* id = b->stateIdentity();
+        std::map<const void*, int>::iterator it = localOnlyCount_.find(id);
+        if (it != localOnlyCount_.end()) {
+            --it->second;
+            if (it->second <= 0) localOnlyCount_.erase(it);
+        }
+    }
+
     Backend& backend_;
     std::function<Element()> body_;
     bool dirty_;
+    bool localDirty_;
+    std::vector<Binding*> bindings_;
+    std::map<const void*, int> localOnlyCount_;
 };
 
 } // namespace skiff
