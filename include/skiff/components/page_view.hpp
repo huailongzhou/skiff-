@@ -151,20 +151,26 @@ public:
     // 本页状态的持有者/管理器
     StateView& stateView() { return stateView_; }
 
-    // 渲染页面:执行 body(组件树构建函数)并缓存结果后返回;
-    // 未 bindLocal 的状态变化时 App 会再次调用;已 bindLocal 的只 patch 对应节点
+    // 渲染页面:执行 body;body 内可写 Bind(state, builder),按调用顺序复用槽位
     const Element& render(Body body) {
+        SlotHost::Guard g(slots_);
         element_ = body(stateView_);
         return element_;
     }
 
-    // 把本页所有状态绑定到 App
-    void bind(App& app) { stateView_.bindAll(app); }
+    // 把本页所有状态绑定到 App,并把本页 SlotHost 挂上(后续 Bind() 自动 bindLocal)
+    void bind(App& app) {
+        stateView_.bindAll(app);
+        slots_.attach(app);
+    }
+
+    SlotHost& slots() { return slots_; }
 
 private:
     std::string name_;
     StateView stateView_;
     Element element_;
+    SlotHost slots_;
 };
 
 } // namespace components

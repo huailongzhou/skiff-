@@ -21,3 +21,4 @@
 #include "components/app_ui.hpp"
 #include "components/memo_view.hpp"
 #include "components/bind_view.hpp"
+#include "slot_host.hpp"

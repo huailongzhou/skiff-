@@ -120,6 +120,7 @@ void run(skiff::App& app, skiff::Platform* platform) {
         if (platform) platform->pumpEvents();
         lv_timer_handler();
         app.update();
+        if (platform) platform->pumpDeferred();
     }
 }
 

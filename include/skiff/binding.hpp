@@ -1,6 +1,6 @@
 // Binding:State 局部更新的类型擦除接口。
 //
-// BindView 实现此接口;App::bindLocal 把它登记为订阅者,
+// BindView 实现此接口;App::bindLocal / SlotHost 把它登记为订阅者,
 // State::set() 时只 patch 对应的已挂载节点,不重跑整页 body()。
 #pragma once
 
@@ -10,6 +10,8 @@
 #include "element.hpp"
 
 namespace skiff {
+
+class SlotHost;
 
 class Binding {
 public:
@@ -25,6 +27,12 @@ public:
 
     // 按当前 State 重建子树(并清除 dirty)
     virtual Element rebuild() = 0;
+
+    // 只清缓存,不通知 App。整页失效时用,避免 Bind 命中旧 i18n。
+    virtual void clearCache() {}
+
+    // Bind 构造器里的嵌套 Bind() 落到这个 SlotHost
+    virtual SlotHost* nestedSlots() { return 0; }
 
     void setInvalidator(std::function<void()> fn) { invalidator_ = std::move(fn); }
     void setUnregister(std::function<void()> fn) { unregister_ = std::move(fn); }

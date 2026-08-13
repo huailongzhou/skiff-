@@ -15,6 +15,7 @@
 
 #include "binding.hpp"
 #include "element.hpp"
+#include "slot_host.hpp"
 #include "state.hpp"
 
 namespace skiff {
@@ -270,7 +271,7 @@ class App {
 public:
     App(Backend& backend, std::function<Element()> body)
         : backend_(backend), body_(std::move(body)), dirty_(true),
-          localDirty_(false) {}
+          localDirty_(false), updating_(false) {}
 
     ~App() {
         for (size_t i = 0; i < bindings_.size(); ++i) {
@@ -301,6 +302,7 @@ public:
         b.setInvalidator([this] { invalidateLocal(); });
         Binding* ptr = &b;
         b.setUnregister([this, ptr] { removeBinding(ptr); });
+        if (SlotHost* nested = b.nestedSlots()) nested->attach(*this);
     }
 
     // 首次挂载。
@@ -314,19 +316,24 @@ public:
 
     // 主循环里定期调用。根失效时重跑 body();仅局部失效时 patch BindView。
     void update() {
+        if (updating_) return;
+        updating_ = true;
         if (dirty_) {
             dirty_ = false;
             localDirty_ = false;
+            for (size_t i = 0; i < bindings_.size(); ++i) {
+                bindings_[i]->clearCache();
+            }
             backend_.mount(body_());
-            return;
+        } else if (localDirty_) {
+            localDirty_ = false;
+            for (size_t i = 0; i < bindings_.size(); ++i) {
+                Binding* b = bindings_[i];
+                if (!b->isDirty()) continue;
+                backend_.patch(b->bindingKey(), b->rebuild());
+            }
         }
-        if (!localDirty_) return;
-        localDirty_ = false;
-        for (size_t i = 0; i < bindings_.size(); ++i) {
-            Binding* b = bindings_[i];
-            if (!b->isDirty()) continue;
-            backend_.patch(b->bindingKey(), b->rebuild());
-        }
+        updating_ = false;
     }
 
 private:
@@ -355,8 +362,20 @@ private:
     std::function<Element()> body_;
     bool dirty_;
     bool localDirty_;
+    bool updating_;
     std::vector<Binding*> bindings_;
     std::map<const void*, int> localOnlyCount_;
 };
+
+inline void SlotHost::attach(App& app) {
+    app_ = &app;
+    for (size_t i = 0; i < ordered_.size(); ++i) app.bindLocal(*ordered_[i]);
+    for (size_t i = 0; i < named_.size(); ++i) app.bindLocal(*named_[i]);
+}
+
+inline void SlotHost::clearCaches() {
+    for (size_t i = 0; i < ordered_.size(); ++i) ordered_[i]->clearCache();
+    for (size_t i = 0; i < named_.size(); ++i) named_[i]->clearCache();
+}
 
 } // namespace skiff

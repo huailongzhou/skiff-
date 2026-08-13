@@ -118,7 +118,7 @@ int main() {
     skiff::input::onSwipeDown(kTopZone, kSwipeThreshold,
                               [&ui]() { ui.toggleMenu(); });
 
-    skiff::lvgl::run(app);
+    skiff::lvgl::run(app, &platform);
     skiff::lvgl::destroySdl3Display();
     return 0;
 }

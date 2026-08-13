@@ -1,35 +1,24 @@
 // BindView:把 State 与一段子树构造器绑定。
 //
-// 默认行为(与 MemoView 类似):按 State::version() 缓存 build() 结果。
-// 再调用 App::bindLocal(view) 后,State::set() 只 patch 这一段已挂载子树,
-// 不再重跑整页 body()。未 bindLocal 的 BindView 仍只作缓存,整页失效照旧。
+// 一般不直接持有 BindView。页面 body / overlay 里写:
+//   Bind(state, [](const T& v) { return Text(...); })
+// SlotHost(PageView / overlay)按调用顺序复用实例,set() 只 patch 对应节点。
 //
-// 重要:ElementView 对象通常是临时生成的,BindView 实例必须在 body() lambda
-// 外部保持存活、跨帧复用同一个实例。如果像普通 Element 一样
-// 在 body() 里临时构造 skiff::Bind(...).build(),每帧都是新实例,缓存与局部
-// patch 都不会生效。
-//
-// 用法:
-//   skiff::State<int> count(0);
-//   skiff::components::BindView<int> counterBind(
-//       count, [](int c) { return skiff::Text(std::to_string(c)); });
-//
-//   auto body = [&]() -> skiff::Element {
-//       return skiff::VStack({
-//           counterBind.build(),
-//           skiff::Text("静态文本"),
-//       });
-//   };
-//   app.bind(count);
-//   app.bindLocal(counterBind);  // 只影响一段子树时使用
+// 仍可手动构造 BindView + App::bindLocal,供测试或自定义槽位。
+// Bind() 必须在 SlotHost::Guard 内调用(PageView::render 已推入)。
 #pragma once
 
 #include <cstdint>
+#include <cstdio>
+#include <cstdlib>
 #include <functional>
 #include <string>
+#include <utility>
 
+#include "../backend.hpp"
 #include "../binding.hpp"
 #include "../element.hpp"
+#include "../slot_host.hpp"
 #include "../state.hpp"
 
 namespace skiff {
@@ -59,7 +48,8 @@ public:
         : ElementView(), Binding(), state_(o.state_),
           builder_(std::move(o.builder_)), lastVersion_(o.lastVersion_),
           cached_(std::move(o.cached_)), dirty_(o.dirty_), subId_(0),
-          key_(o.key_.empty() ? nextBindKey() : std::move(o.key_)) {
+          key_(o.key_.empty() ? nextBindKey() : std::move(o.key_)),
+          nested_(std::move(o.nested_)) {
         o.dirty_ = false;
         if (o.subId_ != 0) {
             o.state_.unsubscribe(o.subId_);
@@ -77,11 +67,10 @@ public:
         runUnregister();
     }
 
-    // State 版本未变化时直接返回缓存的子树,否则重新构造并缓存。
-    // 根节点写入稳定 key,供 Backend::patch 定位。
     Element build() const override {
         const uint64_t current = state_.version();
         if (dirty_ || current != lastVersion_) {
+            SlotHost::Guard g(nested_);
             cached_ = builder_(state_.get());
             cached_.options.keyId = key_;
             lastVersion_ = current;
@@ -99,10 +88,16 @@ public:
     }
     Element rebuild() override { return build(); }
 
-    // 强制下次 build() 重新构造。
-    void invalidate() {
+    void clearCache() override {
         lastVersion_ = static_cast<uint64_t>(-1);
         dirty_ = true;
+        nested_.clearCaches();
+    }
+
+    SlotHost* nestedSlots() override { return &nested_; }
+
+    void invalidate() {
+        clearCache();
         notifyInvalidator();
     }
 
@@ -122,13 +117,55 @@ private:
     mutable bool dirty_;
     uint64_t subId_;
     std::string key_;
+    mutable SlotHost nested_;
 };
 
-// 工厂函数,省去显式模板参数。
-template <typename T>
-inline BindView<T> Bind(State<T>& state,
-                        std::function<Element(const T&)> builder) {
-    return BindView<T>(state, std::move(builder));
+} // namespace components
+
+template <typename T, typename Fn>
+inline Element SlotHost::take(State<T>& state, Fn builder) {
+    if (index_ < ordered_.size()) {
+        Binding* b = ordered_[index_].get();
+        ++index_;
+        return b->rebuild();
+    }
+    components::BindView<T>* v = new components::BindView<T>(
+        state, std::function<Element(const T&)>(std::move(builder)));
+    ordered_.push_back(std::unique_ptr<Binding>(v));
+    ++index_;
+    adopt(v);
+    return v->build();
+}
+
+template <typename T, typename Fn>
+inline Slot SlotHost::bind(State<T>& state, Fn builder) {
+    components::BindView<T>* v = new components::BindView<T>(
+        state, std::function<Element(const T&)>(std::move(builder)));
+    named_.push_back(std::unique_ptr<Binding>(v));
+    adopt(v);
+    return Slot(v);
+}
+
+inline void SlotHost::adopt(Binding* b) {
+    if (app_ && b) app_->bindLocal(*b);
+}
+
+template <typename T, typename Fn>
+inline Element Bind(State<T>& state, Fn builder) {
+    SlotHost* host = SlotHost::current();
+    if (!host) {
+        std::fprintf(stderr,
+                     "skiff::Bind() 须在 PageView::render / overlay 内调用\n");
+        std::abort();
+    }
+    return host->take(state, std::move(builder));
+}
+
+namespace components {
+
+template <typename T, typename Fn>
+inline Element Bind(State<T>& state, Fn builder) {
+    return skiff::Bind(state, std::move(builder));
 }
 
 } // namespace components

@@ -7,7 +7,9 @@
 #include <cstdlib>
 #include <atomic>
 #include <chrono>
+#include <condition_variable>
 #include <cstring>
+#include <mutex>
 #include <sstream>
 #include <string>
 #include <thread>
@@ -57,8 +59,16 @@ bool loadMp3(const std::string& path, SDL_AudioSpec* spec,
     unsigned char chunk[16384];
     size_t n = 0;
     int r;
+    int idle = 0;
+    const size_t kMaxPcm = 80u * 1024u * 1024u;
     while ((r = mpg123_read(mh, chunk, sizeof(chunk), &n)) == MPG123_OK ||
            r == MPG123_NEW_FORMAT) {
+        if (n == 0) {
+            if (++idle > 8) break;
+            continue;
+        }
+        idle = 0;
+        if (pcm.size() + n > kMaxPcm) break;
         pcm.insert(pcm.end(), chunk, chunk + n);
     }
     mpg123_close(mh);
@@ -86,6 +96,7 @@ bool endsWithWav(const std::string& path) {
 // SDL 音频不可用时(无声卡/无音频服务)回退到 aplay。
 class SdlMusicPlayer {
 public:
+    SdlMusicPlayer() : stream_(nullptr), buf_(nullptr), len_(0), playing_(false) {}
     ~SdlMusicPlayer() { stop(); }
 
     bool play(const std::string& path) {
@@ -93,50 +104,58 @@ public:
         if (!SDL_WasInit(SDL_INIT_AUDIO)) SDL_InitSubSystem(SDL_INIT_AUDIO);
 
         SDL_AudioSpec spec;
+        Uint8* buf = nullptr;
+        Uint32 len = 0;
         if (endsWithWav(path)) {
-            if (!SDL_LoadWAV(path.c_str(), &spec, &buf_, &len_)) {
+            if (!SDL_LoadWAV(path.c_str(), &spec, &buf, &len)) {
                 std::printf("[LinuxPlatform] SDL_LoadWAV failed: %s\n",
                             SDL_GetError());
-                buf_ = nullptr;
                 return false;
             }
-        } else if (!loadMp3(path, &spec, &buf_, &len_)) {
+        } else if (!loadMp3(path, &spec, &buf, &len)) {
             std::printf("[LinuxPlatform] load mp3 failed: %s\n", path.c_str());
             return false;
         }
-        stream_ = SDL_OpenAudioDeviceStream(SDL_AUDIO_DEVICE_DEFAULT_PLAYBACK,
-                                            &spec, nullptr, nullptr);
-        if (!stream_) {
+        SDL_AudioStream* stream =
+            SDL_OpenAudioDeviceStream(SDL_AUDIO_DEVICE_DEFAULT_PLAYBACK,
+                                      &spec, nullptr, nullptr);
+        if (!stream) {
             std::printf("[LinuxPlatform] open audio device failed: %s\n",
                         SDL_GetError());
-            SDL_free(buf_);
-            buf_ = nullptr;
+            SDL_free(buf);
             return false;
         }
-        SDL_PutAudioStreamData(stream_, buf_, (int)len_);
-        SDL_ResumeAudioStreamDevice(stream_);
-        playing_ = true;
+        SDL_PutAudioStreamData(stream, buf, (int)len);
+        SDL_ResumeAudioStreamDevice(stream);
+        {
+            std::lock_guard<std::mutex> lk(mu_);
+            stopLocked();
+            stream_ = stream;
+            buf_ = buf;
+            len_ = len;
+            playing_ = true;
+        }
         return true;
     }
 
     void stop() {
-        if (stream_) { SDL_DestroyAudioStream(stream_); stream_ = nullptr; }
-        if (buf_) { SDL_free(buf_); buf_ = nullptr; }
-        playing_ = false;
-        // 回退路径可能起过 aplay,一并清掉(无害)
+        {
+            std::lock_guard<std::mutex> lk(mu_);
+            stopLocked();
+        }
         std::system("killall aplay 2>/dev/null");
     }
 
-    // 播完自动停止;外部可定期查询
     bool isPlaying() {
+        std::lock_guard<std::mutex> lk(mu_);
         if (playing_ && stream_ && SDL_GetAudioStreamQueued(stream_) == 0) {
-            stop();
+            stopLocked();
         }
         return playing_;
     }
 
-    // 播放进度百分比(0~100);未在播放返回 -1。可在监控线程调用。
     int progressPct() const {
+        std::lock_guard<std::mutex> lk(mu_);
         if (!playing_ || !stream_ || len_ == 0) return -1;
         const int queued = SDL_GetAudioStreamQueued(stream_);
         int pct = (int)((len_ - (Uint32)queued) * 100 / len_);
@@ -146,13 +165,103 @@ public:
     }
 
 private:
-    SDL_AudioStream* stream_ = nullptr;
-    Uint8* buf_ = nullptr;
-    Uint32 len_ = 0;
-    bool playing_ = false;
+    void stopLocked() {
+        if (stream_) { SDL_DestroyAudioStream(stream_); stream_ = nullptr; }
+        if (buf_) { SDL_free(buf_); buf_ = nullptr; }
+        len_ = 0;
+        playing_ = false;
+    }
+
+    mutable std::mutex mu_;
+    SDL_AudioStream* stream_;
+    Uint8* buf_;
+    Uint32 len_;
+    bool playing_;
 };
 
 SdlMusicPlayer gMusicPlayer;
+
+void fallbackAplay(const std::string& path);
+
+// 解码 MP3 / 打开声卡放到工作线程,避免卡住 LVGL 主循环。
+class MusicService {
+public:
+    struct Cmd {
+        bool stop;
+        std::string path;
+        Cmd() : stop(true) {}
+        Cmd(bool s, const std::string& p) : stop(s), path(p) {}
+    };
+
+    MusicService() : running_(true) {}
+    ~MusicService() { shutdown(); }
+
+    void requestPlay(const std::string& path) {
+        std::lock_guard<std::mutex> lk(mu_);
+        ensureThreadLocked();
+        q_.clear();
+        q_.push_back(Cmd(false, path));
+        cv_.notify_one();
+    }
+
+    void requestStop() {
+        std::lock_guard<std::mutex> lk(mu_);
+        ensureThreadLocked();
+        q_.clear();
+        q_.push_back(Cmd(true, std::string()));
+        cv_.notify_one();
+    }
+
+    void shutdown() {
+        {
+            std::lock_guard<std::mutex> lk(mu_);
+            if (!running_) return;
+            running_ = false;
+            cv_.notify_one();
+        }
+        if (th_.joinable()) th_.join();
+    }
+
+private:
+    void ensureThreadLocked() {
+        if (!th_.joinable() && running_) {
+            th_ = std::thread(&MusicService::loop, this);
+        }
+    }
+
+    void loop() {
+        for (;;) {
+            Cmd cmd;
+            {
+                std::unique_lock<std::mutex> lk(mu_);
+                while (q_.empty() && running_) cv_.wait(lk);
+                if (!running_ && q_.empty()) return;
+                if (q_.empty()) return;
+                cmd = q_.front();
+                q_.erase(q_.begin());
+            }
+            if (cmd.stop) {
+                gMusicPlayer.stop();
+                std::printf("[LinuxPlatform] stopMusic\n");
+            } else if (gMusicPlayer.play(cmd.path)) {
+                std::printf("[LinuxPlatform] playMusic %s (SDL audio)\n",
+                            cmd.path.c_str());
+            } else {
+                fallbackAplay(cmd.path);
+                std::printf("[LinuxPlatform] playMusic %s (aplay fallback)\n",
+                            cmd.path.c_str());
+            }
+        }
+    }
+
+    std::mutex mu_;
+    std::condition_variable cv_;
+    std::vector<Cmd> q_;
+    bool running_;
+    std::thread th_;
+};
+
+MusicService gMusicService;
 
 // 播放监控:每 500ms 检查进度,经平台事件上报给 UI(在独立线程运行)。
 // 进度变化时 emit "musicProgress" [pct];播放自然结束时 emit "musicEnded"。
@@ -261,22 +370,14 @@ void registerLinuxPlatform(skiff::Platform& platform) {
             [](const std::vector<std::string>& args) {
                 const std::string path = args.empty() ? "" : args[0];
                 if (path.empty()) return;
-                if (gMusicPlayer.play(path)) {
-                    std::printf("[LinuxPlatform] playMusic %s (SDL audio)\n",
-                                path.c_str());
-                } else {
-                    fallbackAplay(path);
-                    std::printf("[LinuxPlatform] playMusic %s (aplay fallback)\n",
-                                path.c_str());
-                }
+                gMusicService.requestPlay(path);
             });
     }
 
     if (platform.hasDeclared("stopMusic")) {
         platform.registerExternal("stopMusic",
             [](const std::vector<std::string>&) {
-                gMusicPlayer.stop();
-                std::printf("[LinuxPlatform] stopMusic\n");
+                gMusicService.requestStop();
             });
     }
 }
@@ -307,6 +408,7 @@ int main() {
 
     skiff::lvgl::run(app, &platform);  // 主循环每帧 pumpEvents 派发平台事件
 
+    gMusicService.shutdown();
     monitorRunning = false;
     monitor.join();
     gMusicPlayer.stop();  // 先停音频,再销毁 SDL

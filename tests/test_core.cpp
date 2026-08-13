@@ -668,6 +668,151 @@ static void test_app_root_invalidate() {
     CHECK(backend.updateCount() >= 1);
 }
 
+// ---- ② SlotHost::bind 句柄:自动 bindLocal,不持有 BindView 成员 ----
+static void test_slot_bind_handle() {
+    TestBackend backend;
+    skiff::State<int> count(0);
+    int buildCount = 0;
+    int bodyCount = 0;
+
+    skiff::SlotHost host;
+    skiff::Slot slot = host.bind(count, [&buildCount](int c) -> skiff::Element {
+        ++buildCount;
+        return skiff::Text(std::to_string(c));
+    });
+
+    skiff::App app(backend, [&bodyCount, &slot]() -> skiff::Element {
+        ++bodyCount;
+        return skiff::VStack({
+            slot.build(),
+            skiff::Text("static"),
+        }, 0);
+    });
+    host.attach(app);
+    app.bind(count);
+    app.start();
+
+    CHECK(bodyCount == 1);
+    CHECK(buildCount == 1);
+    backend.resetCounts();
+
+    count.set(2);
+    app.update();
+    CHECK(bodyCount == 1);
+    CHECK(buildCount == 2);
+    CHECK(backend.updateCount() == 1);
+}
+
+// ---- ③ 内联 Bind():body 内按调用顺序建槽 ----
+static void test_inline_bind() {
+    TestBackend backend;
+    skiff::State<int> count(0);
+    int buildCount = 0;
+    int bodyCount = 0;
+
+    skiff::SlotHost host;
+    skiff::App app(backend, [&]() -> skiff::Element {
+        ++bodyCount;
+        skiff::SlotHost::Guard g(host);
+        return skiff::VStack({
+            skiff::Bind(count, [&buildCount](int c) -> skiff::Element {
+                ++buildCount;
+                return skiff::Text(std::to_string(c));
+            }),
+            skiff::Text("static"),
+        }, 0);
+    });
+    host.attach(app);
+    app.bind(count);
+    app.start();
+
+    CHECK(bodyCount == 1);
+    CHECK(buildCount == 1);
+    backend.resetCounts();
+
+    count.set(3);
+    app.update();
+    CHECK(bodyCount == 1);
+    CHECK(buildCount == 2);
+    CHECK(backend.createCount() == 0);
+    CHECK(backend.updateCount() == 1);
+}
+
+// ---- 嵌套 Bind:外层缓存命中时内层仍可单独 patch ----
+static void test_nested_bind() {
+    TestBackend backend;
+    skiff::State<int> outer(0);
+    skiff::State<int> inner(0);
+    int outerBuild = 0;
+    int innerBuild = 0;
+    int bodyCount = 0;
+
+    skiff::SlotHost host;
+    skiff::App app(backend, [&]() -> skiff::Element {
+        ++bodyCount;
+        skiff::SlotHost::Guard g(host);
+        return skiff::Bind(outer, [&](int o) -> skiff::Element {
+            ++outerBuild;
+            return skiff::Bind(inner, [&](int i) -> skiff::Element {
+                ++innerBuild;
+                return skiff::Text(std::to_string(o) + "," + std::to_string(i));
+            });
+        });
+    });
+    host.attach(app);
+    app.bind(outer);
+    app.bind(inner);
+    app.start();
+
+    CHECK(bodyCount == 1);
+    CHECK(outerBuild == 1);
+    CHECK(innerBuild == 1);
+
+    inner.set(1);
+    app.update();
+    CHECK(bodyCount == 1);
+    CHECK(outerBuild == 1);
+    CHECK(innerBuild == 2);
+}
+
+// ---- 整页失效会清 Bind 缓存(语言切换等) ----
+static void test_root_clears_bind_cache() {
+    TestBackend backend;
+    skiff::State<int> count(0);
+    skiff::State<int> root(0);
+    int bindBuilds = 0;
+    int bodyCount = 0;
+
+    skiff::SlotHost host;
+    skiff::App app(backend, [&]() -> skiff::Element {
+        ++bodyCount;
+        skiff::SlotHost::Guard g(host);
+        return skiff::VStack({
+            skiff::Bind(count, [&bindBuilds](int c) -> skiff::Element {
+                ++bindBuilds;
+                return skiff::Text(std::to_string(c));
+            }),
+            skiff::Text(std::to_string(root.get())),
+        }, 0);
+    });
+    host.attach(app);
+    app.bind(count);
+    app.bind(root);
+    app.start();
+    CHECK(bodyCount == 1);
+    CHECK(bindBuilds == 1);
+
+    count.set(1);
+    app.update();
+    CHECK(bodyCount == 1);
+    CHECK(bindBuilds == 2);
+
+    root.set(1);
+    app.update();
+    CHECK(bodyCount == 2);
+    CHECK(bindBuilds == 3);
+}
+
 // ---- i18n 框架层:注册目录 / 切换语言 / 按下标查找 ----
 static void test_i18n() {
     enum { k_hi = 0, k_bye, k_count };
@@ -701,6 +846,21 @@ static void test_i18n() {
     CHECK(skiff::i18n::t(k_count).empty());
 }
 
+static void test_platform_invoke_later() {
+    skiff::Platform p;
+    int n = 0;
+    p.registerExternal("play", [&n](const std::vector<std::string>& args) {
+        if (!args.empty() && args[0] == "ok") ++n;
+    });
+    p.invokeLater("play", {"ok"});
+    CHECK(n == 0);
+    p.pumpDeferred();
+    CHECK(n == 1);
+    p.invokeLater("play", {"ok"});
+    p.pumpEvents();
+    CHECK(n == 2);
+}
+
 int main() {
     test_router();
     test_router_middle_duplicate();
@@ -723,7 +883,12 @@ int main() {
     test_state_multi_subscribe();
     test_bind_local_patch();
     test_app_root_invalidate();
+    test_slot_bind_handle();
+    test_inline_bind();
+    test_nested_bind();
+    test_root_clears_bind_cache();
     test_i18n();
+    test_platform_invoke_later();
 
     if (failures == 0) {
         std::printf("all tests passed\n");

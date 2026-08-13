@@ -191,6 +191,7 @@ public:
         std::vector<Element> rootChildren;
         rootChildren.push_back(page);
         if (overlayBuilder_) {
+            SlotHost::Guard g(overlaySlots_);
             std::vector<Element> overlays = overlayBuilder_();
             rootChildren.insert(rootChildren.end(), overlays.begin(), overlays.end());
         }
@@ -201,6 +202,7 @@ public:
     void bind(App& app) {
         app.bind(nav_);
         for (size_t i = 0; i < pages_.size(); ++i) pages_[i].page->bind(app);
+        overlaySlots_.attach(app);
     }
 
 private:
@@ -277,6 +279,7 @@ private:
     std::vector<Entry> pages_;
     std::function<Element()> fallback_;
     OverlayBuilder overlayBuilder_;
+    SlotHost overlaySlots_;
 };
 
 } // namespace components

@@ -16,6 +16,7 @@
 //       // UI 侧:更新进度状态
 //   });
 //   platform.invokeExternal("setBrightness", {"80"});
+//   platform.invokeLater("playMusic", {path});  // 勿在 LVGL 点击回调里同步做重活
 //   platform.emit("musicProgress", {"40"});   // 后台线程
 //   platform.pumpEvents();                    // 主循环每帧调用(SDL 宿主 run 已集成)
 #pragma once
@@ -59,6 +60,14 @@ public:
         }
     }
 
+    // 延后到下一次 pumpEvents() 再 invokeExternal。
+    // LVGL 点击回调里不要同步解码音频/开设备,否则主循环卡住、看起来像死机。
+    void invokeLater(const std::string& name,
+                     const std::vector<std::string>& args) {
+        std::lock_guard<std::mutex> lk(eventMutex_);
+        deferred_.push_back(std::make_pair(name, args));
+    }
+
     // ---- 事件:平台 → UI ----
 
     // 订阅一个平台事件(按名字,后者覆盖前者)。handler 在 UI 线程执行。
@@ -73,8 +82,8 @@ public:
         eventQueue_.push_back(std::make_pair(name, args));
     }
 
-    // 派发所有已入队的事件。必须在 UI 线程(主循环)里调用,
-    // SDL 宿主的 run(app, &platform) 已每帧自动调用。
+    // 派发已入队的平台事件。必须在 UI 线程调用。
+    // SDL 宿主 run() 每帧在 lv_timer_handler 之前调用。
     void pumpEvents() {
         std::vector<std::pair<std::string, std::vector<std::string> > > pending;
         {
@@ -88,6 +97,20 @@ public:
                 it->second(pending[i].second);
             }
         }
+        pumpDeferred();
+    }
+
+    // 执行 invokeLater 排队的 external。SDL 宿主在 app.update() 之后再调一次,
+    // 这样点击里排队的 playMusic 发生在页面切换之后,且不堵在 LVGL 事件回调里。
+    void pumpDeferred() {
+        std::vector<std::pair<std::string, std::vector<std::string> > > later;
+        {
+            std::lock_guard<std::mutex> lk(eventMutex_);
+            later.swap(deferred_);
+        }
+        for (size_t i = 0; i < later.size(); ++i) {
+            invokeExternal(later[i].first, later[i].second);
+        }
     }
 
 private:
@@ -95,6 +118,7 @@ private:
     std::set<std::string> declared_;
     std::map<std::string, EventHandler> eventHandlers_;
     std::vector<std::pair<std::string, std::vector<std::string> > > eventQueue_;
+    std::vector<std::pair<std::string, std::vector<std::string> > > deferred_;
     std::mutex eventMutex_;
 };
 
