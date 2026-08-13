@@ -1,6 +1,6 @@
-// Binding:State 局部更新的类型擦除接口。
+// Watchable:State 局部更新的类型擦除接口。
 //
-// BindView 实现此接口;App::bindLocal / SlotHost 把它登记为订阅者,
+// WatchView 实现此接口;App::watchLocal / SlotHost 把它登记为订阅者,
 // State::set() 时只 patch 对应的已挂载节点,不重跑整页 body()。
 #pragma once
 
@@ -13,14 +13,14 @@ namespace skiff {
 
 class SlotHost;
 
-class Binding {
+class Watchable {
 public:
-    virtual ~Binding() {}
+    virtual ~Watchable() {}
 
     // 写入 Element.options.keyId,Backend::patch 用它定位 MountedNode
-    virtual const std::string& bindingKey() const = 0;
+    virtual const std::string& watchKey() const = 0;
 
-    // 所绑定 State 的地址,App 用来把该 State 标成局部失效
+    // 所监听 State 的地址,App 用来把该 State 标成局部失效
     virtual const void* stateIdentity() const = 0;
 
     virtual bool isDirty() const = 0;
@@ -28,10 +28,10 @@ public:
     // 按当前 State 重建子树(并清除 dirty)
     virtual Element rebuild() = 0;
 
-    // 只清缓存,不通知 App。整页失效时用,避免 Bind 命中旧 i18n。
+    // 只清缓存,不通知 App。整页失效时用,避免 Watch 命中旧 i18n。
     virtual void clearCache() {}
 
-    // Bind 构造器里的嵌套 Bind() 落到这个 SlotHost
+    // Watch 构造器里的嵌套 Watch() 落到这个 SlotHost
     virtual SlotHost* nestedSlots() { return 0; }
 
     void setInvalidator(std::function<void()> fn) { invalidator_ = std::move(fn); }

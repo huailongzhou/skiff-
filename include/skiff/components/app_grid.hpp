@@ -163,7 +163,9 @@ public:
         } else {
             if (root.options.width <= 0 && root.options.widthPct <= 0)
                 root.options.widthPct = 100;
-            if (root.options.height <= 0 && root.options.heightPct <= 0)
+            // 已 expand() 时由父容器分配剩余高度,不要再写成 100%(会和 TopNav 叠裁切)
+            if (root.options.height <= 0 && root.options.heightPct <= 0 &&
+                !root.options.flexGrow)
                 root.options.heightPct = 100;
         }
         root.options.scrollDir = gridOpts_.horizontal_ ? ScrollHorizontal : ScrollVertical;

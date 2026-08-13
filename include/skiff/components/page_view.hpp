@@ -151,14 +151,14 @@ public:
     // 本页状态的持有者/管理器
     StateView& stateView() { return stateView_; }
 
-    // 渲染页面:执行 body;body 内可写 Bind(state, builder),按调用顺序复用槽位
+    // 渲染页面:执行 body;body 内可写 Watch(state, builder),按调用顺序复用槽位
     const Element& render(Body body) {
         SlotHost::Guard g(slots_);
         element_ = body(stateView_);
         return element_;
     }
 
-    // 把本页所有状态绑定到 App,并把本页 SlotHost 挂上(后续 Bind() 自动 bindLocal)
+    // 把本页所有状态绑定到 App,并把本页 SlotHost 挂上(后续 Watch() 自动 watchLocal)
     void bind(App& app) {
         stateView_.bindAll(app);
         slots_.attach(app);

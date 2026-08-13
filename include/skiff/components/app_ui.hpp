@@ -52,10 +52,11 @@ public:
     // 渲染当前页面(供 App 的 body 使用)
     Element render() { return router_.render(); }
 
-    // 一次性绑定:全局状态 + 所有页面状态 + 路由状态
+    // 一次性绑定:全局状态 + 所有页面状态 + 路由状态 + 每帧 tick
     virtual void bind(App& app) {
         states_.bindAll(app);
         router_.bind(app);
+        app.setTick([this] { tick(); });
     }
 
     // 批量注册全局状态:类型标签 + {名字, 初值} 列表,如:
@@ -87,6 +88,9 @@ protected:
     Platform& platform() { return platform_; }
     Router& router() { return router_; }
     StateView& states() { return states_; }
+
+    // 主循环每帧调用(App::update 开头)。默认空;物理模拟等可重写。
+    virtual void tick() {}
 
 private:
     static void requireTag(state::Tag got, state::Tag want) {

@@ -3,9 +3,10 @@
 #pragma once
 
 #include "element.hpp"
+#include "canvas.hpp"
 #include "state.hpp"
 #include "backend.hpp"
-#include "binding.hpp"
+#include "watchable.hpp"
 #include "platform.hpp"
 #include "input.hpp"
 #include "layout.hpp"
@@ -20,5 +21,5 @@
 #include "components/router.hpp"
 #include "components/app_ui.hpp"
 #include "components/memo_view.hpp"
-#include "components/bind_view.hpp"
+#include "components/watch_view.hpp"
 #include "slot_host.hpp"

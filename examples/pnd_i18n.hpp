@@ -37,6 +37,16 @@ enum Key {
     app_files,
     app_clock,
     app_brightness,
+    app_physics,
+    app_games,
+
+    physics_pause,
+    physics_resume,
+    physics_drop_box,
+    physics_drop_ball,
+    physics_reset,
+    physics_hint,
+    game_physics_sub,
 
     common_demo,
     common_on,
@@ -74,6 +84,8 @@ enum Key {
 
     music_playing,
     music_stopped,
+    music_now_playing,
+    music_unknown_artist,
 
     media_video,
     media_music,
@@ -113,6 +125,16 @@ inline void fillZhCN(std::string* c) {
     c[app_files] = "文件";
     c[app_clock] = "时钟";
     c[app_brightness] = "亮度";
+    c[app_physics] = "物理";
+    c[app_games] = "游戏";
+
+    c[physics_pause] = "暂停";
+    c[physics_resume] = "继续";
+    c[physics_drop_box] = "投方块";
+    c[physics_drop_ball] = "投圆球";
+    c[physics_reset] = "重置";
+    c[physics_hint] = "点击画布投放刚体";
+    c[game_physics_sub] = "Box2D 刚体沙盒";
 
     c[common_demo] = "功能演示界面";
     c[common_on] = "开启";
@@ -150,6 +172,8 @@ inline void fillZhCN(std::string* c) {
 
     c[music_playing] = "正在播放";
     c[music_stopped] = "已停止";
+    c[music_now_playing] = "正在播放";
+    c[music_unknown_artist] = "未知艺人";
 
     c[media_video] = "视频";
     c[media_music] = "音乐";
@@ -185,6 +209,16 @@ inline void fillEn(std::string* c) {
     c[app_files] = "Files";
     c[app_clock] = "Clock";
     c[app_brightness] = "Brightness";
+    c[app_physics] = "Physics";
+    c[app_games] = "Games";
+
+    c[physics_pause] = "Pause";
+    c[physics_resume] = "Resume";
+    c[physics_drop_box] = "Box";
+    c[physics_drop_ball] = "Ball";
+    c[physics_reset] = "Reset";
+    c[physics_hint] = "Tap canvas to drop a body";
+    c[game_physics_sub] = "Box2D rigid-body sandbox";
 
     c[common_demo] = "Feature demo";
     c[common_on] = "On";
@@ -222,6 +256,8 @@ inline void fillEn(std::string* c) {
 
     c[music_playing] = "Playing";
     c[music_stopped] = "Stopped";
+    c[music_now_playing] = "Now Playing";
+    c[music_unknown_artist] = "Unknown Artist";
 
     c[media_video] = "Video";
     c[media_music] = "Music";
@@ -282,6 +318,8 @@ inline const std::string& routeTitle(const std::string& routeId) {
     if (routeId == "calculator") return SKIFF_TR(app_calculator);
     if (routeId == "files") return SKIFF_TR(app_files);
     if (routeId == "clock") return SKIFF_TR(app_clock);
+    if (routeId == "physics") return SKIFF_TR(app_physics);
+    if (routeId == "games") return SKIFF_TR(app_games);
     static const std::string empty;
     return empty;
 }

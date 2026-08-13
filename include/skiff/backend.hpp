@@ -13,7 +13,7 @@
 #include <memory>
 #include <vector>
 
-#include "binding.hpp"
+#include "watchable.hpp"
 #include "element.hpp"
 #include "slot_host.hpp"
 #include "state.hpp"
@@ -273,15 +273,19 @@ public:
         : backend_(backend), body_(std::move(body)), dirty_(true),
           localDirty_(false), updating_(false) {}
 
+    // 每帧在 mount/patch 之前调用(物理步进、动画时钟等)。
+    // 回调里可以 set State,随后本次 update() 会消化 dirty。
+    void setTick(std::function<void()> fn) { tick_ = std::move(fn); }
+
     ~App() {
-        for (size_t i = 0; i < bindings_.size(); ++i) {
-            bindings_[i]->setInvalidator(std::function<void()>());
-            bindings_[i]->setUnregister(std::function<void()>());
+        for (size_t i = 0; i < watchables_.size(); ++i) {
+            watchables_[i]->setInvalidator(std::function<void()>());
+            watchables_[i]->setUnregister(std::function<void()>());
         }
     }
 
     // 绑定一个状态:默认整页失效(重跑 body + mount)。
-    // 若该 State 已 bindLocal,则改为只 patch 对应 BindView。
+    // 若该 State 已 watchLocal,则改为只 patch 对应 WatchView。
     template <typename T>
     void bind(State<T>& s) {
         const void* id = static_cast<const void*>(&s);
@@ -291,18 +295,18 @@ public:
         });
     }
 
-    // 把 BindView 登记为局部订阅:该 State 变化时不重跑 body(),
-    // 只按 bindingKey 更新已挂载子树。须在 start() 之前调用。
-    void bindLocal(Binding& b) {
-        for (size_t i = 0; i < bindings_.size(); ++i) {
-            if (bindings_[i] == &b) return;
+    // 把 WatchView 登记为局部订阅:该 State 变化时不重跑 body(),
+    // 只按 watchKey 更新已挂载子树。须在 start() 之前调用。
+    void watchLocal(Watchable& w) {
+        for (size_t i = 0; i < watchables_.size(); ++i) {
+            if (watchables_[i] == &w) return;
         }
-        bindings_.push_back(&b);
-        ++localOnlyCount_[b.stateIdentity()];
-        b.setInvalidator([this] { invalidateLocal(); });
-        Binding* ptr = &b;
-        b.setUnregister([this, ptr] { removeBinding(ptr); });
-        if (SlotHost* nested = b.nestedSlots()) nested->attach(*this);
+        watchables_.push_back(&w);
+        ++localOnlyCount_[w.stateIdentity()];
+        w.setInvalidator([this] { invalidateLocal(); });
+        Watchable* ptr = &w;
+        w.setUnregister([this, ptr] { removeWatchable(ptr); });
+        if (SlotHost* nested = w.nestedSlots()) nested->attach(*this);
     }
 
     // 首次挂载。
@@ -314,23 +318,24 @@ public:
 
     void invalidateLocal() { localDirty_ = true; }
 
-    // 主循环里定期调用。根失效时重跑 body();仅局部失效时 patch BindView。
+    // 主循环里定期调用。根失效时重跑 body();仅局部失效时 patch WatchView。
     void update() {
         if (updating_) return;
+        if (tick_) tick_();
         updating_ = true;
         if (dirty_) {
             dirty_ = false;
             localDirty_ = false;
-            for (size_t i = 0; i < bindings_.size(); ++i) {
-                bindings_[i]->clearCache();
+            for (size_t i = 0; i < watchables_.size(); ++i) {
+                watchables_[i]->clearCache();
             }
             backend_.mount(body_());
         } else if (localDirty_) {
             localDirty_ = false;
-            for (size_t i = 0; i < bindings_.size(); ++i) {
-                Binding* b = bindings_[i];
-                if (!b->isDirty()) continue;
-                backend_.patch(b->bindingKey(), b->rebuild());
+            for (size_t i = 0; i < watchables_.size(); ++i) {
+                Watchable* w = watchables_[i];
+                if (!w->isDirty()) continue;
+                backend_.patch(w->watchKey(), w->rebuild());
             }
         }
         updating_ = false;
@@ -342,15 +347,15 @@ private:
         return it != localOnlyCount_.end() && it->second > 0;
     }
 
-    void removeBinding(Binding* b) {
-        if (!b) return;
-        for (size_t i = 0; i < bindings_.size(); ++i) {
-            if (bindings_[i] == b) {
-                bindings_.erase(bindings_.begin() + static_cast<std::ptrdiff_t>(i));
+    void removeWatchable(Watchable* w) {
+        if (!w) return;
+        for (size_t i = 0; i < watchables_.size(); ++i) {
+            if (watchables_[i] == w) {
+                watchables_.erase(watchables_.begin() + static_cast<std::ptrdiff_t>(i));
                 break;
             }
         }
-        const void* id = b->stateIdentity();
+        const void* id = w->stateIdentity();
         std::map<const void*, int>::iterator it = localOnlyCount_.find(id);
         if (it != localOnlyCount_.end()) {
             --it->second;
@@ -360,17 +365,18 @@ private:
 
     Backend& backend_;
     std::function<Element()> body_;
+    std::function<void()> tick_;
     bool dirty_;
     bool localDirty_;
     bool updating_;
-    std::vector<Binding*> bindings_;
+    std::vector<Watchable*> watchables_;
     std::map<const void*, int> localOnlyCount_;
 };
 
 inline void SlotHost::attach(App& app) {
     app_ = &app;
-    for (size_t i = 0; i < ordered_.size(); ++i) app.bindLocal(*ordered_[i]);
-    for (size_t i = 0; i < named_.size(); ++i) app.bindLocal(*named_[i]);
+    for (size_t i = 0; i < ordered_.size(); ++i) app.watchLocal(*ordered_[i]);
+    for (size_t i = 0; i < named_.size(); ++i) app.watchLocal(*named_[i]);
 }
 
 inline void SlotHost::clearCaches() {

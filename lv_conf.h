@@ -15,6 +15,9 @@
 /* flex 布局(VStack/HStack 的底层实现) */
 #define LV_USE_FLEX 1
 
+/* 像素画布(skiff::Canvas → lv_canvas);缓冲由后端用 new[] 分配,不走本内存池 */
+#define LV_USE_CANVAS 1
+
 /* 演示页面用到的字体;内置 CJK 字体只有 16px,大字号由后端缩放 */
 #define LV_FONT_MONTSERRAT_12 1
 #define LV_FONT_MONTSERRAT_16 1
@@ -27,7 +30,7 @@
 #define LV_USE_FREETYPE 1
 #define LV_FREETYPE_CACHE_SIZE (64 * 1024)
 
-/* 内置内存池大小(字节),示例/冒烟测试够用 */
-#define LV_MEM_SIZE (128U * 1024U)
+/* 内置内存池大小(字节)。Canvas 像素缓冲在池外;绘制时 LVGL 会要一些临时块 */
+#define LV_MEM_SIZE (256U * 1024U)
 
 #endif /* LV_CONF_H */

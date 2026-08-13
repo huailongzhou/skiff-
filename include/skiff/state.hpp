@@ -1,5 +1,5 @@
 // 类似 SwiftUI 的 @State:持有页面状态。
-// set() 发布给所有订阅者:未 bindLocal 的走整页失效,已 bindLocal 的 BindView 只 patch 对应节点。
+// set() 发布给所有订阅者:未 watchLocal 的走整页失效,已 watchLocal 的 WatchView 只 patch 对应节点。
 #pragma once
 
 #include <cstddef>
@@ -18,7 +18,7 @@ public:
 
     const T& get() const { return value_; }
 
-    // 每次 set() 自增,用于 BindView 等细粒度缓存判断
+    // 每次 set() 自增,用于 WatchView 等细粒度缓存判断
     uint64_t version() const { return version_; }
 
     void set(const T& value) {

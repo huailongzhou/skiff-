@@ -3,7 +3,7 @@
 轻舟(Skiff)是一个 **C++11 声明式嵌入式 UI 框架**：像 SwiftUI 一样用代码描述界面，状态驱动更新，后端可插拔。
 
 - 核心后端无关(纯头文件 `include/skiff/`)，换后端不改页面代码
-- 元素:`ElementView` 包装 + `VStack` / `HStack` / `Text` / `Button` / `Spacer` / `Slider` / `TabView` / `TapArea` / `External`
+- 元素:`ElementView` 包装 + `VStack` / `HStack` / `Text` / `Button` / `Spacer` / `Slider` / `TabView` / `TapArea` / `Canvas` / `External`
 - 组合组件(纯 DSL):`TopNav`(顶部导航条)、`TabView`(页签菜单 + 内容区)、`AppGrid`(分页应用网格)、`DropDown`(下拉菜单)、`List`(垂直列表)、`Router`(页面栈路由)、`AppUi`(应用 UI 基类)
 - 多国语言框架:`include/skiff/i18n.hpp`（`registerCatalog` / `setLocale` / `t` / 宏 `SKIFF_TR`）
 - PND 业务文案:`examples/pnd_i18n.hpp`（枚举 key + 中英表 + `pnd::i18n::init`）
@@ -20,6 +20,7 @@ backends/lvgl/          LVGL 后端 + SDL3 宿主
 examples/               示例
   counter           无头冒烟测试
   counter_sdl       SDL3 窗口:计数器
+  physics_sdl       SDL3 窗口:Canvas + Box2D 物理模拟
   pnd_sdl           平台无关的车机 PND UI 定义(无 main,被平台入口包含)
   pnd_i18n          PND 业务文案(枚举 + 中英目录)
   freetype_check    FreeType / 字体覆盖检查
@@ -28,7 +29,7 @@ platforms/              平台入口(挂载 PND UI + 注册平台能力)
   win/              pnd_win(Windows:winmm 音乐 / WMI 亮度,含 MinGW 交叉工具链)
   linux/            pnd_linux(Linux:aplay 音乐 / sysfs 背光)
 third_party/            vendored 依赖
-  lvgl(8.4) / SDL3(3.2.14) / freetype(2.13.2)
+  lvgl(8.4) / SDL3(3.2.14) / freetype(2.13.2) / box2d(2.4.1)
 assets/fonts/           示例用字体(仅预览)
 assets/music/           示例音乐
 assets/media/           示例多媒体文件(按需放置)
@@ -48,6 +49,7 @@ cmake --build build -j
 ```bash
 ./build/counter          # 无头冒烟:状态 → 重建链路
 ./build/counter_sdl      # SDL3 窗口:计数器
+./build/physics_sdl      # SDL3 窗口:Canvas + Box2D 物理模拟
 ./build/pnd_mac          # SDL3 窗口:车机 PND 主页(macOS 平台入口)
 ./build/pnd_linux        # SDL3 窗口:车机 PND 主页(Linux 平台入口)
 ./build/freetype_check   # FreeType 字体加载与字形覆盖检查

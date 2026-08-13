@@ -1,11 +1,11 @@
-// BindView:把 State 与一段子树构造器绑定。
+// WatchView:把 State 与一段子树构造器绑定。
 //
-// 一般不直接持有 BindView。页面 body / overlay 里写:
-//   Bind(state, [](const T& v) { return Text(...); })
+// 一般不直接持有 WatchView。页面 body / overlay 里写:
+//   Watch(state, [](const T& v) { return Text(...); })
 // SlotHost(PageView / overlay)按调用顺序复用实例,set() 只 patch 对应节点。
 //
-// 仍可手动构造 BindView + App::bindLocal,供测试或自定义槽位。
-// Bind() 必须在 SlotHost::Guard 内调用(PageView::render 已推入)。
+// 仍可手动构造 WatchView + App::watchLocal,供测试或自定义槽位。
+// Watch() 必须在 SlotHost::Guard 内调用(PageView::render 已推入)。
 #pragma once
 
 #include <cstdint>
@@ -16,39 +16,39 @@
 #include <utility>
 
 #include "../backend.hpp"
-#include "../binding.hpp"
 #include "../element.hpp"
 #include "../slot_host.hpp"
 #include "../state.hpp"
+#include "../watchable.hpp"
 
 namespace skiff {
 namespace components {
 
-inline std::string nextBindKey() {
+inline std::string nextWatchKey() {
     static uint64_t n = 0;
     ++n;
-    return std::string("skiff.bind.") + std::to_string(n);
+    return std::string("skiff.watch.") + std::to_string(n);
 }
 
 template <typename T>
-class BindView : public ElementView, public Binding {
+class WatchView : public ElementView, public Watchable {
 public:
-    BindView(State<T>& state, std::function<Element(const T&)> builder)
-        : ElementView(), Binding(), state_(state), builder_(std::move(builder)),
+    WatchView(State<T>& state, std::function<Element(const T&)> builder)
+        : ElementView(), Watchable(), state_(state), builder_(std::move(builder)),
           lastVersion_(static_cast<uint64_t>(-1)), dirty_(true), subId_(0),
-          key_(nextBindKey()) {
+          key_(nextWatchKey()) {
         subscribe_();
     }
 
-    BindView(const BindView&) = delete;
-    BindView& operator=(const BindView&) = delete;
-    BindView& operator=(BindView&&) = delete;
+    WatchView(const WatchView&) = delete;
+    WatchView& operator=(const WatchView&) = delete;
+    WatchView& operator=(WatchView&&) = delete;
 
-    BindView(BindView&& o)
-        : ElementView(), Binding(), state_(o.state_),
+    WatchView(WatchView&& o)
+        : ElementView(), Watchable(), state_(o.state_),
           builder_(std::move(o.builder_)), lastVersion_(o.lastVersion_),
           cached_(std::move(o.cached_)), dirty_(o.dirty_), subId_(0),
-          key_(o.key_.empty() ? nextBindKey() : std::move(o.key_)),
+          key_(o.key_.empty() ? nextWatchKey() : std::move(o.key_)),
           nested_(std::move(o.nested_)) {
         o.dirty_ = false;
         if (o.subId_ != 0) {
@@ -59,7 +59,7 @@ public:
         subscribe_();
     }
 
-    ~BindView() {
+    ~WatchView() {
         if (subId_ != 0) {
             state_.unsubscribe(subId_);
             subId_ = 0;
@@ -79,7 +79,7 @@ public:
         return cached_;
     }
 
-    const std::string& bindingKey() const override { return key_; }
+    const std::string& watchKey() const override { return key_; }
     const void* stateIdentity() const override {
         return static_cast<const void*>(&state_);
     }
@@ -125,13 +125,13 @@ private:
 template <typename T, typename Fn>
 inline Element SlotHost::take(State<T>& state, Fn builder) {
     if (index_ < ordered_.size()) {
-        Binding* b = ordered_[index_].get();
+        Watchable* b = ordered_[index_].get();
         ++index_;
         return b->rebuild();
     }
-    components::BindView<T>* v = new components::BindView<T>(
+    components::WatchView<T>* v = new components::WatchView<T>(
         state, std::function<Element(const T&)>(std::move(builder)));
-    ordered_.push_back(std::unique_ptr<Binding>(v));
+    ordered_.push_back(std::unique_ptr<Watchable>(v));
     ++index_;
     adopt(v);
     return v->build();
@@ -139,23 +139,23 @@ inline Element SlotHost::take(State<T>& state, Fn builder) {
 
 template <typename T, typename Fn>
 inline Slot SlotHost::bind(State<T>& state, Fn builder) {
-    components::BindView<T>* v = new components::BindView<T>(
+    components::WatchView<T>* v = new components::WatchView<T>(
         state, std::function<Element(const T&)>(std::move(builder)));
-    named_.push_back(std::unique_ptr<Binding>(v));
+    named_.push_back(std::unique_ptr<Watchable>(v));
     adopt(v);
     return Slot(v);
 }
 
-inline void SlotHost::adopt(Binding* b) {
-    if (app_ && b) app_->bindLocal(*b);
+inline void SlotHost::adopt(Watchable* b) {
+    if (app_ && b) app_->watchLocal(*b);
 }
 
 template <typename T, typename Fn>
-inline Element Bind(State<T>& state, Fn builder) {
+inline Element Watch(State<T>& state, Fn builder) {
     SlotHost* host = SlotHost::current();
     if (!host) {
         std::fprintf(stderr,
-                     "skiff::Bind() 须在 PageView::render / overlay 内调用\n");
+                     "skiff::Watch() 须在 PageView::render / overlay 内调用\n");
         std::abort();
     }
     return host->take(state, std::move(builder));
@@ -164,8 +164,8 @@ inline Element Bind(State<T>& state, Fn builder) {
 namespace components {
 
 template <typename T, typename Fn>
-inline Element Bind(State<T>& state, Fn builder) {
-    return skiff::Bind(state, std::move(builder));
+inline Element Watch(State<T>& state, Fn builder) {
+    return skiff::Watch(state, std::move(builder));
 }
 
 } // namespace components

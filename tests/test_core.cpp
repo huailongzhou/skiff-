@@ -574,12 +574,12 @@ static void test_backend_diff_taparea_callback() {
     CHECK(backend.updateCount() == 2);
 }
 
-// ---- BindView:State 版本变化才重建子树,set 同值也会触发版本更新 ----
-static void test_bind_view() {
+// ---- WatchView:State 版本变化才重建子树,set 同值也会触发版本更新 ----
+static void test_watch_view() {
     skiff::State<int> count(0);
     int buildCount = 0;
 
-    comp::BindView<int> view(count, [&buildCount](int c) -> skiff::Element {
+    comp::WatchView<int> view(count, [&buildCount](int c) -> skiff::Element {
         ++buildCount;
         return skiff::Text(std::to_string(c));
     });
@@ -598,7 +598,7 @@ static void test_bind_view() {
 
     count.set(5);  // 值相同但版本自增
     skiff::Element e4 = view.build();
-    CHECK(buildCount == 3);  // BindView 按版本判断,会重建
+    CHECK(buildCount == 3);  // WatchView 按版本判断,会重建
 
     view.invalidate();
     skiff::Element e5 = view.build();
@@ -634,14 +634,14 @@ static void test_state_multi_subscribe() {
     CHECK(b == 3);
 }
 
-// ---- BindView + bindLocal:只 patch 绑定子树,不重跑 body ----
-static void test_bind_local_patch() {
+// ---- WatchView + watchLocal:只 patch 监听子树,不重跑 body ----
+static void test_watch_local_patch() {
     TestBackend backend;
     skiff::State<int> count(0);
     int buildCount = 0;
     int bodyCount = 0;
 
-    comp::BindView<int> view(count, [&buildCount](int c) -> skiff::Element {
+    comp::WatchView<int> view(count, [&buildCount](int c) -> skiff::Element {
         ++buildCount;
         return skiff::Text(std::to_string(c));
     });
@@ -654,7 +654,7 @@ static void test_bind_local_patch() {
         }, 0);
     });
     app.bind(count);
-    app.bindLocal(view);
+    app.watchLocal(view);
     app.start();
 
     CHECK(bodyCount == 1);
@@ -671,7 +671,7 @@ static void test_bind_local_patch() {
     CHECK(backend.moveCount() == 0);
 }
 
-// ---- 未 bindLocal 时 State 仍触发整页 body + mount ----
+// ---- 未 watchLocal 时 State 仍触发整页 body + mount ----
 static void test_app_root_invalidate() {
     TestBackend backend;
     skiff::State<int> count(0);
@@ -693,7 +693,7 @@ static void test_app_root_invalidate() {
     CHECK(backend.updateCount() >= 1);
 }
 
-// ---- ② SlotHost::bind 句柄:自动 bindLocal,不持有 BindView 成员 ----
+// ---- ② SlotHost::bind 句柄:自动 watchLocal,不持有 WatchView 成员 ----
 static void test_slot_bind_handle() {
     TestBackend backend;
     skiff::State<int> count(0);
@@ -728,8 +728,8 @@ static void test_slot_bind_handle() {
     CHECK(backend.updateCount() == 1);
 }
 
-// ---- ③ 内联 Bind():body 内按调用顺序建槽 ----
-static void test_inline_bind() {
+// ---- ③ 内联 Watch():body 内按调用顺序建槽 ----
+static void test_inline_watch() {
     TestBackend backend;
     skiff::State<int> count(0);
     int buildCount = 0;
@@ -740,7 +740,7 @@ static void test_inline_bind() {
         ++bodyCount;
         skiff::SlotHost::Guard g(host);
         return skiff::VStack({
-            skiff::Bind(count, [&buildCount](int c) -> skiff::Element {
+            skiff::Watch(count, [&buildCount](int c) -> skiff::Element {
                 ++buildCount;
                 return skiff::Text(std::to_string(c));
             }),
@@ -763,8 +763,8 @@ static void test_inline_bind() {
     CHECK(backend.updateCount() == 1);
 }
 
-// ---- 嵌套 Bind:外层缓存命中时内层仍可单独 patch ----
-static void test_nested_bind() {
+// ---- 嵌套 Watch:外层缓存命中时内层仍可单独 patch ----
+static void test_nested_watch() {
     TestBackend backend;
     skiff::State<int> outer(0);
     skiff::State<int> inner(0);
@@ -776,9 +776,9 @@ static void test_nested_bind() {
     skiff::App app(backend, [&]() -> skiff::Element {
         ++bodyCount;
         skiff::SlotHost::Guard g(host);
-        return skiff::Bind(outer, [&](int o) -> skiff::Element {
+        return skiff::Watch(outer, [&](int o) -> skiff::Element {
             ++outerBuild;
-            return skiff::Bind(inner, [&](int i) -> skiff::Element {
+            return skiff::Watch(inner, [&](int i) -> skiff::Element {
                 ++innerBuild;
                 return skiff::Text(std::to_string(o) + "," + std::to_string(i));
             });
@@ -800,12 +800,12 @@ static void test_nested_bind() {
     CHECK(innerBuild == 2);
 }
 
-// ---- 整页失效会清 Bind 缓存(语言切换等) ----
-static void test_root_clears_bind_cache() {
+// ---- 整页失效会清 Watch 缓存(语言切换等) ----
+static void test_root_clears_watch_cache() {
     TestBackend backend;
     skiff::State<int> count(0);
     skiff::State<int> root(0);
-    int bindBuilds = 0;
+    int watchBuilds = 0;
     int bodyCount = 0;
 
     skiff::SlotHost host;
@@ -813,8 +813,8 @@ static void test_root_clears_bind_cache() {
         ++bodyCount;
         skiff::SlotHost::Guard g(host);
         return skiff::VStack({
-            skiff::Bind(count, [&bindBuilds](int c) -> skiff::Element {
-                ++bindBuilds;
+            skiff::Watch(count, [&watchBuilds](int c) -> skiff::Element {
+                ++watchBuilds;
                 return skiff::Text(std::to_string(c));
             }),
             skiff::Text(std::to_string(root.get())),
@@ -825,17 +825,17 @@ static void test_root_clears_bind_cache() {
     app.bind(root);
     app.start();
     CHECK(bodyCount == 1);
-    CHECK(bindBuilds == 1);
+    CHECK(watchBuilds == 1);
 
     count.set(1);
     app.update();
     CHECK(bodyCount == 1);
-    CHECK(bindBuilds == 2);
+    CHECK(watchBuilds == 2);
 
     root.set(1);
     app.update();
     CHECK(bodyCount == 2);
-    CHECK(bindBuilds == 3);
+    CHECK(watchBuilds == 3);
 }
 
 // ---- i18n 框架层:注册目录 / 切换语言 / 按下标查找 ----
@@ -886,6 +886,54 @@ static void test_platform_invoke_later() {
     CHECK(n == 2);
 }
 
+// ---- Canvas:核心只存缓冲尺寸和绘制回调,不执行绘制 ----
+static void test_canvas_element() {
+    int painted = 0;
+    skiff::Element e = skiff::Canvas(80, 40, [&painted](skiff::CanvasContext& c) {
+        ++painted;
+        c.clear(0x112233);
+        c.fillRect(0, 0, 10, 10, 0xFF0000, 0);
+        c.fillCircle(20, 20, 5, 0x00FF00);
+        skiff::CanvasPoint tri[3];
+        tri[0] = skiff::CanvasPoint(0, 0);
+        tri[1] = skiff::CanvasPoint(10, 0);
+        tri[2] = skiff::CanvasPoint(5, 8);
+        c.fillPolygon(tri, 3, 0x0000FF);
+        c.strokeLine(tri, 2, 0xFFFFFF, 1);
+        c.strokeArc(40, 20, 8, 0, 180, 0xFFFF00, 2);
+    });
+    CHECK(e.kind == skiff::Element::Canvas);
+    CHECK(e.options.width == 80);
+    CHECK(e.options.height == 40);
+    CHECK(e.rare.get() != 0);
+    CHECK(e.rare->canvasW == 80);
+    CHECK(e.rare->canvasH == 40);
+    CHECK(painted == 0);
+
+    struct MockCtx : skiff::CanvasContext {
+        int w, h, clears, rects, circles, polys, lines, arcs;
+        MockCtx() : w(80), h(40), clears(0), rects(0), circles(0),
+                    polys(0), lines(0), arcs(0) {}
+        int width() const { return w; }
+        int height() const { return h; }
+        void clear(uint32_t, uint8_t) { ++clears; }
+        void fillRect(int, int, int, int, uint32_t, int) { ++rects; }
+        void fillCircle(int, int, int, uint32_t) { ++circles; }
+        void fillPolygon(const skiff::CanvasPoint*, int, uint32_t) { ++polys; }
+        void strokeLine(const skiff::CanvasPoint*, int, uint32_t, int) { ++lines; }
+        void strokeArc(int, int, int, int, int, uint32_t, int) { ++arcs; }
+    };
+    MockCtx ctx;
+    e.rare->paint(ctx);
+    CHECK(painted == 1);
+    CHECK(ctx.clears == 1);
+    CHECK(ctx.rects == 1);
+    CHECK(ctx.circles == 1);
+    CHECK(ctx.polys == 1);
+    CHECK(ctx.lines == 1);
+    CHECK(ctx.arcs == 1);
+}
+
 int main() {
     test_router();
     test_router_middle_duplicate();
@@ -905,16 +953,17 @@ int main() {
     test_backend_diff_no_key();
     test_backend_diff_taparea_callback();
     test_memo_view();
-    test_bind_view();
+    test_watch_view();
     test_state_multi_subscribe();
-    test_bind_local_patch();
+    test_watch_local_patch();
     test_app_root_invalidate();
     test_slot_bind_handle();
-    test_inline_bind();
-    test_nested_bind();
-    test_root_clears_bind_cache();
+    test_inline_watch();
+    test_nested_watch();
+    test_root_clears_watch_cache();
     test_i18n();
     test_platform_invoke_later();
+    test_canvas_element();
 
     if (failures == 0) {
         std::printf("all tests passed\n");

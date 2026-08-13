@@ -59,12 +59,21 @@ if(SKIFF_BACKEND_LVGL)
         add_executable(counter_sdl examples/counter_sdl.cpp)
         target_link_libraries(counter_sdl PRIVATE skiff_lvgl_sdl3)
 
+        # Box2D 2.4(从 domi 同步的源码);只编库,不编官方 testbed
+        set(BOX2D_BUILD_UNIT_TESTS OFF CACHE BOOL "" FORCE)
+        set(BOX2D_BUILD_TESTBED OFF CACHE BOOL "" FORCE)
+        set(BOX2D_BUILD_DOCS OFF CACHE BOOL "" FORCE)
+        add_subdirectory(third_party/box2d EXCLUDE_FROM_ALL)
+
+        add_executable(physics_sdl examples/physics_sdl.cpp)
+        target_link_libraries(physics_sdl PRIVATE skiff_lvgl_sdl3 box2d)
+
         # pnd_sdl.cpp 现在是平台无关的 UI 定义,没有 main,
         # 平台入口在 platforms/<平台>/ 下。
         if(APPLE)
             add_executable(pnd_mac platforms/mac/mac_platform.cpp)
             target_include_directories(pnd_mac PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
-            target_link_libraries(pnd_mac PRIVATE skiff_lvgl_sdl3)
+            target_link_libraries(pnd_mac PRIVATE skiff_lvgl_sdl3 box2d)
             target_link_libraries(pnd_mac PRIVATE
                 "/System/Library/PrivateFrameworks/DisplayServices.framework"
                 "-framework CoreGraphics")
@@ -72,12 +81,12 @@ if(SKIFF_BACKEND_LVGL)
         if(WIN32)
             add_executable(pnd_win platforms/win/win_platform.cpp)
             target_include_directories(pnd_win PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
-            target_link_libraries(pnd_win PRIVATE skiff_lvgl_sdl3 winmm)
+            target_link_libraries(pnd_win PRIVATE skiff_lvgl_sdl3 box2d winmm)
         endif()
         if(UNIX AND NOT APPLE)
             add_executable(pnd_linux platforms/linux/linux_platform.cpp)
             target_include_directories(pnd_linux PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
-            target_link_libraries(pnd_linux PRIVATE skiff_lvgl_sdl3 mpg123)
+            target_link_libraries(pnd_linux PRIVATE skiff_lvgl_sdl3 box2d mpg123)
         endif()
     endif()
 endif()

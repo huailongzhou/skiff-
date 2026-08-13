@@ -15,6 +15,7 @@
 #include <utility>
 #include <vector>
 
+#include "canvas.hpp"
 #include "elements/attr_options.hpp"
 #include "elements/list_options.hpp"
 
@@ -23,13 +24,16 @@ namespace skiff {
 // 前向声明
 class ElementView;
 
-// 小众数据:仅 Slider / 带状态样式的节点才分配,Element 本体保持精简。
+// 小众数据:仅 Slider / Canvas / 带状态样式的节点才分配,Element 本体保持精简。
 struct RareData {
     int min, max, value;                        // Slider 用
     std::function<void(int)> onValueChange;     // Slider 值变化回调
+    int canvasW, canvasH;                       // Canvas 像素缓冲尺寸
+    CanvasPainter paint;                        // Canvas 绘制回调
+    std::function<void(int, int)> onTapAt;      // Canvas 点击,坐标相对画布
     // 各状态下的样式覆盖,参考 LVGL 的 state selector
     std::map<elements::state, elements::attrOptions> stateStyles;
-    RareData() : min(0), max(100), value(0) {}
+    RareData() : min(0), max(100), value(0), canvasW(0), canvasH(0) {}
 };
 
 struct Element {
@@ -43,6 +47,7 @@ struct Element {
         TabView,  // 页签容器(对应 SwiftUI 的 TabView;children 为各页内容,
                   // 每个 child 的 tabTitle 作为该页标题,见 Tab())
         TapArea,  // 透明点击区:不渲染 UI,用于捕获点击事件(如关闭浮层)
+        Canvas,   // 像素画布:paint 回调里用 CanvasContext 绘制
     };
 
     Kind kind;
@@ -332,6 +337,31 @@ inline ElementView TapArea(std::function<void()> onTap) {
     e.kind = Element::TapArea;
     e.onTap = std::move(onTap);
     return ElementView(std::move(e));
+}
+
+// 像素画布:w/h 为缓冲尺寸(像素)。paint 由后端在挂载/更新时调用。
+// 需要点击坐标时链式 .onTapAt(cb);通用 modifier 之后用 .as<CanvasView>()。
+class CanvasView : public ElementView {
+public:
+    CanvasView() {}
+    explicit CanvasView(Element&& e) : ElementView(std::move(e)) {}
+
+    CanvasView& onTapAt(std::function<void(int, int)> cb) {
+        e_->ensureRare().onTapAt = std::move(cb);
+        return *this;
+    }
+};
+
+inline CanvasView Canvas(int w, int h, CanvasPainter paint) {
+    Element e;
+    e.kind = Element::Canvas;
+    e.options.width = w;
+    e.options.height = h;
+    RareData& rd = e.ensureRare();
+    rd.canvasW = w;
+    rd.canvasH = h;
+    rd.paint = std::move(paint);
+    return CanvasView(std::move(e));
 }
 
 } // namespace skiff

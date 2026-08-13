@@ -62,8 +62,8 @@ void applyScroll(lv_obj_t* obj, ScrollDir dir, ScrollSnap snap) {
 
     if (d != LV_DIR_NONE) {
         lv_obj_add_flag(obj, LV_OBJ_FLAG_SCROLLABLE);
+        lv_obj_add_flag(obj, LV_OBJ_FLAG_CLICKABLE);
         lv_obj_set_scroll_dir(obj, d);
-        lv_obj_clear_flag(obj, LV_OBJ_FLAG_SCROLL_MOMENTUM);
     }
 
     lv_scroll_snap_t s = LV_SCROLL_SNAP_NONE;
@@ -72,6 +72,7 @@ void applyScroll(lv_obj_t* obj, ScrollDir dir, ScrollSnap snap) {
     else if (snap == SnapEnd) s = LV_SCROLL_SNAP_END;
 
     if (s != LV_SCROLL_SNAP_NONE) {
+        lv_obj_add_flag(obj, LV_OBJ_FLAG_SCROLL_ONE);
         if (dir == ScrollHorizontal || dir == ScrollBoth) {
             lv_obj_set_scroll_snap_x(obj, s);
         }
@@ -145,6 +146,11 @@ void applyObjectSize(lv_obj_t* obj, const Element& e, lv_obj_t* parent) {
     }
 
     lv_obj_set_size(obj, w, h);
+    // 仅全宽的 Row/Column 锁最小宽度,供 AppGrid 分页;不要套到 Slider/TapArea/下拉菜单
+    if (e.options.widthPct == 100 &&
+        (e.kind == Element::Column || e.kind == Element::Row)) {
+        lv_obj_set_style_min_width(obj, lv_pct(100), 0);
+    }
 }
 
 // 应用下边框
@@ -169,6 +175,111 @@ void applyPadding(lv_obj_t* obj, const Element& e) {
         lv_obj_set_style_pad_left(obj, (lv_coord_t)e.options.paddingLeft, 0);
         lv_obj_set_style_pad_right(obj, (lv_coord_t)e.options.paddingRight, 0);
     }
+}
+
+// Canvas 像素缓冲挂在 lv_obj user_data 上,不走 LV_MEM_SIZE 池。
+void freeCanvasBuffer(lv_obj_t* obj) {
+    void* buf = lv_obj_get_user_data(obj);
+    if (buf) {
+        delete[] static_cast<lv_color_t*>(buf);
+        lv_obj_set_user_data(obj, nullptr);
+    }
+}
+
+void onCanvasDeleted(lv_event_t* e) {
+    freeCanvasBuffer(static_cast<lv_obj_t*>(lv_event_get_target(e)));
+}
+
+class LvglCanvasContext : public CanvasContext {
+public:
+    LvglCanvasContext(lv_obj_t* canvas, int w, int h)
+        : canvas_(canvas), w_(w), h_(h) {}
+
+    int width() const { return w_; }
+    int height() const { return h_; }
+
+    void clear(uint32_t rgb, uint8_t opa) {
+        lv_canvas_fill_bg(canvas_, lv_color_hex(rgb), opa);
+    }
+
+    void fillRect(int x, int y, int w, int h, uint32_t rgb, int radius) {
+        if (w <= 0 || h <= 0) return;
+        lv_draw_rect_dsc_t dsc;
+        lv_draw_rect_dsc_init(&dsc);
+        dsc.bg_color = lv_color_hex(rgb);
+        dsc.bg_opa = LV_OPA_COVER;
+        dsc.radius = (lv_coord_t)(radius > 0 ? radius : 0);
+        dsc.border_width = 0;
+        dsc.shadow_width = 0;
+        dsc.outline_width = 0;
+        lv_canvas_draw_rect(canvas_, (lv_coord_t)x, (lv_coord_t)y,
+                            (lv_coord_t)w, (lv_coord_t)h, &dsc);
+    }
+
+    void fillCircle(int cx, int cy, int r, uint32_t rgb) {
+        if (r <= 0) return;
+        fillRect(cx - r, cy - r, r * 2, r * 2, rgb, r);
+    }
+
+    void fillPolygon(const CanvasPoint* pts, int n, uint32_t rgb) {
+        if (!pts || n < 3) return;
+        enum { kMax = 64 };
+        lv_point_t buf[kMax];
+        const int count = n > kMax ? kMax : n;
+        for (int i = 0; i < count; ++i) {
+            buf[i].x = (lv_coord_t)pts[i].x;
+            buf[i].y = (lv_coord_t)pts[i].y;
+        }
+        lv_draw_rect_dsc_t dsc;
+        lv_draw_rect_dsc_init(&dsc);
+        dsc.bg_color = lv_color_hex(rgb);
+        dsc.bg_opa = LV_OPA_COVER;
+        dsc.border_width = 0;
+        dsc.shadow_width = 0;
+        lv_canvas_draw_polygon(canvas_, buf, (uint32_t)count, &dsc);
+    }
+
+    void strokeLine(const CanvasPoint* pts, int n, uint32_t rgb, int width) {
+        if (!pts || n < 2) return;
+        enum { kMax = 64 };
+        lv_point_t buf[kMax];
+        const int count = n > kMax ? kMax : n;
+        for (int i = 0; i < count; ++i) {
+            buf[i].x = (lv_coord_t)pts[i].x;
+            buf[i].y = (lv_coord_t)pts[i].y;
+        }
+        lv_draw_line_dsc_t dsc;
+        lv_draw_line_dsc_init(&dsc);
+        dsc.color = lv_color_hex(rgb);
+        dsc.width = (lv_coord_t)(width > 0 ? width : 1);
+        dsc.round_start = 1;
+        dsc.round_end = 1;
+        lv_canvas_draw_line(canvas_, buf, (uint32_t)count, &dsc);
+    }
+
+    void strokeArc(int cx, int cy, int r, int startDeg, int endDeg,
+                   uint32_t rgb, int width) {
+        if (r <= 0) return;
+        lv_draw_arc_dsc_t dsc;
+        lv_draw_arc_dsc_init(&dsc);
+        dsc.color = lv_color_hex(rgb);
+        dsc.width = (lv_coord_t)(width > 0 ? width : 1);
+        lv_canvas_draw_arc(canvas_, (lv_coord_t)cx, (lv_coord_t)cy,
+                           (lv_coord_t)r, startDeg, endDeg, &dsc);
+    }
+
+private:
+    lv_obj_t* canvas_;
+    int w_;
+    int h_;
+};
+
+void paintCanvas(lv_obj_t* obj, const Element& e) {
+    const RareData& rd = rareOf(e);
+    if (!rd.paint || rd.canvasW <= 0 || rd.canvasH <= 0) return;
+    LvglCanvasContext ctx(obj, rd.canvasW, rd.canvasH);
+    rd.paint(ctx);
+    lv_obj_invalidate(obj);
 }
 
 } // namespace
@@ -399,7 +510,8 @@ void* LvglBackend::createGraphicObject(const Element& e, void* parent,
     case Element::Button: {
         obj = lv_btn_create(lv_parent);
         lv_obj_clear_flag(obj, LV_OBJ_FLAG_SCROLLABLE);
-        lv_obj_add_flag(obj, LV_OBJ_FLAG_PRESS_LOCK);
+        // 允许把拖动手势交给可滚动父容器(应用网格翻页)
+        lv_obj_clear_flag(obj, LV_OBJ_FLAG_PRESS_LOCK);
         // 去掉默认主题的阴影/边框/最小尺寸,避免点击区域大于 size
         lv_obj_set_style_shadow_width(obj, 0, 0);
         lv_obj_set_style_border_width(obj, 0, 0);
@@ -447,6 +559,7 @@ void* LvglBackend::createGraphicObject(const Element& e, void* parent,
         lv_slider_set_value(obj, rd.value, LV_ANIM_OFF);
         applyStateStyles(obj, e);
         applyObjectSize(obj, e, lv_parent);
+        if (e.options.flexGrow) lv_obj_set_flex_grow(obj, 1);
         if (rd.onValueChange && node) {
             std::function<void(int)> cb = rd.onValueChange;
             node->callbacks.push_back(std::unique_ptr<std::function<void()> >(
@@ -469,6 +582,37 @@ void* LvglBackend::createGraphicObject(const Element& e, void* parent,
         for (size_t i = 0; i < e.children.size(); ++i) {
             lv_obj_t* page = lv_tabview_add_tab(obj, tabTitleOf(e.children[i]).c_str());
             clearCard(page);  // 去掉默认主题的白底卡片样式,让页面底色透出来
+        }
+        break;
+    }
+    case Element::Canvas: {
+        const RareData& rd = rareOf(e);
+        obj = lv_canvas_create(lv_parent);
+        clearCard(obj);
+        applyObjectSize(obj, e, lv_parent);
+        if (e.options.flexGrow) lv_obj_set_flex_grow(obj, 1);
+        if (rd.canvasW > 0 && rd.canvasH > 0) {
+            lv_color_t* buf = new lv_color_t[(size_t)rd.canvasW * (size_t)rd.canvasH];
+            lv_canvas_set_buffer(obj, buf, (lv_coord_t)rd.canvasW,
+                                 (lv_coord_t)rd.canvasH, LV_IMG_CF_TRUE_COLOR);
+            lv_obj_set_user_data(obj, buf);
+            lv_obj_add_event_cb(obj, &onCanvasDeleted, LV_EVENT_DELETE, nullptr);
+            paintCanvas(obj, e);
+        }
+        if (rd.onTapAt && node) {
+            lv_obj_add_flag(obj, LV_OBJ_FLAG_CLICKABLE);
+            std::function<void(int, int)> cb = rd.onTapAt;
+            node->callbacks.push_back(std::unique_ptr<std::function<void()> >(
+                new std::function<void()>([obj, cb] {
+                    lv_indev_t* indev = lv_indev_get_act();
+                    lv_point_t p;
+                    lv_indev_get_point(indev, &p);
+                    lv_area_t a;
+                    lv_obj_get_coords(obj, &a);
+                    cb((int)(p.x - a.x1), (int)(p.y - a.y1));
+                })));
+            lv_obj_add_event_cb(obj, &LvglBackend::onClicked, LV_EVENT_CLICKED,
+                                node->callbacks.back().get());
         }
         break;
     }
@@ -547,6 +691,9 @@ void LvglBackend::updateGraphicObject(MountedNode& old, const Element& e) {
             old.element.options.widthPct != e.options.widthPct || old.element.options.heightPct != e.options.heightPct) {
             applyObjectSize(obj, e, lv_obj_get_parent(obj));
         }
+        if (old.element.options.flexGrow != e.options.flexGrow) {
+            lv_obj_set_flex_grow(obj, e.options.flexGrow ? 1 : 0);
+        }
         break;
     }
     case Element::TabView: {
@@ -561,6 +708,31 @@ void LvglBackend::updateGraphicObject(MountedNode& old, const Element& e) {
             old.element.options.hasBg != e.options.hasBg || old.element.options.bgColor != e.options.bgColor) {
             applyTabBarStyle(obj, e);
         }
+        break;
+    }
+    case Element::Canvas: {
+        const RareData& oldRd = rareOf(old.element);
+        const RareData& newRd = rareOf(e);
+        if (old.element.options.width != e.options.width || old.element.options.height != e.options.height ||
+            old.element.options.widthPct != e.options.widthPct || old.element.options.heightPct != e.options.heightPct) {
+            applyObjectSize(obj, e, lv_obj_get_parent(obj));
+        }
+        if (old.element.options.flexGrow != e.options.flexGrow) {
+            lv_obj_set_flex_grow(obj, e.options.flexGrow ? 1 : 0);
+        }
+        if (oldRd.onTapAt && newRd.onTapAt && !old.callbacks.empty()) {
+            lv_obj_t* canvas = obj;
+            std::function<void(int, int)> cb = newRd.onTapAt;
+            *old.callbacks[0] = [canvas, cb] {
+                lv_indev_t* indev = lv_indev_get_act();
+                lv_point_t p;
+                lv_indev_get_point(indev, &p);
+                lv_area_t a;
+                lv_obj_get_coords(canvas, &a);
+                cb((int)(p.x - a.x1), (int)(p.y - a.y1));
+            };
+        }
+        paintCanvas(obj, e);
         break;
     }
     }
@@ -614,6 +786,8 @@ bool LvglBackend::needsRebuild(const MountedNode& old, const Element& e) {
     if ((!old.element.onTap && e.onTap) || (old.element.onTap && !e.onTap)) return true;
     if ((!oldRd.onValueChange && newRd.onValueChange) ||
         (oldRd.onValueChange && !newRd.onValueChange)) return true;
+    if (oldRd.canvasW != newRd.canvasW || oldRd.canvasH != newRd.canvasH) return true;
+    if ((!oldRd.onTapAt && newRd.onTapAt) || (oldRd.onTapAt && !newRd.onTapAt)) return true;
     return false;
 }
 
