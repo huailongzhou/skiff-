@@ -27,6 +27,12 @@ public:
         notify();
     }
 
+    // 值未变则不 bump、不 notify。场景投影到 UI State 时用这个。
+    void setIfChanged(const T& value) {
+        if (value_ == value) return;
+        set(value);
+    }
+
     // 注册订阅者,返回 id,供 unsubscribe 使用。可同时存在多个订阅者。
     uint64_t subscribe(std::function<void()> cb) {
         const uint64_t id = ++nextSubId_;

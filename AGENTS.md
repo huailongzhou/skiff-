@@ -22,7 +22,7 @@ ctest --test-dir build       # `core` + `physics_headless` + `music_headless`
 
 - Core is pure header-only (`include/skiff/`), backend-agnostic. Page code must include **only** `skiff/skiff.hpp`; only files in `backends/lvgl/` may include `lvgl.h`. PC entry points additionally include `skiff_lvgl.hpp` then `skiff_lvgl_sdl3.hpp`.
 - `examples/app_core/` is the **headless app core** (scenes). It must **not** include `skiff/skiff.hpp` or `lvgl.h`. UI talks to it via commands + `onChange`; PND/physics pages may include these headers.
-- `examples/pnd_sdl.cpp` has **no main**; it is a platform-agnostic UI definition that each platform entry `#include`s (e.g. `platforms/mac/mac_platform.cpp` does `#include "examples/pnd_sdl.cpp"`). Platform entries register capabilities via `platform.registerExternal(...)`; page code only `declare`/`invokeExternal`.
+- `examples/pnd_sdl.cpp` has **no main**; it is a platform-agnostic UI definition that each platform entry `#include`s (e.g. `platforms/mac/mac_platform.cpp` does `#include "examples/pnd_sdl.cpp"`). `pnd::bindPlatform` (`examples/pnd_platform.cpp`) does `declare`/`on`; platform entries `registerExternal(...)`; pages talk to scenes or `invokeExternal`.
 - i18n is two layers: framework `skiff/i18n.hpp` (`registerCatalog`/`setLocale`/`t`/`SKIFF_TR`), business catalogs in `examples/pnd_i18n.hpp` (`pnd::i18n::init`). Route IDs are stable English strings; labels are i18n enums.
 - `third_party/` is vendored (lvgl v8.4, SDL3-3.2.14, freetype-2.13.2, box2d 2.4.1) — do not edit. `third_party/lvgl-release-v8.3/` is an unused leftover, not referenced by CMake.
 - Linux build needs `libmpg123` (dev package); macOS links private `DisplayServices.framework`; Windows links `winmm`.

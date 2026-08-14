@@ -115,10 +115,10 @@ Element page = TabView({
 
 ## 平台能力 / 外部回调
 
-页面代码只声明需要的能力，具体实现由平台入口注册:
+页面胶水声明需要的能力，具体实现由平台入口注册:
 
 ```cpp
-// 页面代码
+// 应用胶水(examples/pnd_platform.cpp)
 platform.declare("setBrightness");
 platform.invokeExternal("setBrightness", {"80"});
 

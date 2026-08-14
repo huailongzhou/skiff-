@@ -35,15 +35,9 @@ skiff::ElementView toolBtn(const char* label, std::function<void()> onTap) {
 
 void syncPhysicsUi(skiff::components::PageView& page, const app::PhysicsScene& scene) {
     skiff::components::StateView& st = page.stateView();
-    const int frame = (int)scene.frame();
-    skiff::State<int>& frameSt = st.get<int>(pnd::phys::frame);
-    if (frameSt.get() != frame) frameSt.set(frame);
-    const bool paused = scene.paused();
-    skiff::State<bool>& pausedSt = st.get<bool>(pnd::phys::paused);
-    if (pausedSt.get() != paused) pausedSt.set(paused);
-    const int shape = scene.dropCircle() ? 1 : 0;
-    skiff::State<int>& shapeSt = st.get<int>(pnd::phys::shape);
-    if (shapeSt.get() != shape) shapeSt.set(shape);
+    st.get<int>(pnd::phys::frame).setIfChanged((int)scene.frame());
+    st.get<bool>(pnd::phys::paused).setIfChanged(scene.paused());
+    st.get<int>(pnd::phys::shape).setIfChanged(scene.dropCircle() ? 1 : 0);
 }
 
 } // namespace

@@ -317,20 +317,19 @@ public:
         tickLast_ = std::chrono::steady_clock::now();
         music_.setSink(&musicSink_);
         pnd::bindPlatform(platform, music_);
+        scenes_.add(music_);
         scenes_.add(physics_);
+        scenes_.activate("music");  // 后台常驻,离页不停播
         pnd::i18n::init("zh-CN");
         // 注册全局状态(由 StateView 持有,bindAll 一次性绑定)
         globalStatesInit(skiff::components::state::BOOL, {
             {pnd::g::menuExpanded, false},
-            {pnd::g::musicPlaying, false},
         });
         globalStatesInit(skiff::components::state::INT, {
             {pnd::g::brightness, 80},
-            {pnd::g::musicProgress, 0},
             {pnd::g::mediaCategory, 0},
         });
         globalStatesInit(skiff::components::state::STRING, {
-            {pnd::g::currentTrack, music_.current().path},
             {pnd::g::locale, "zh-CN"},
         });
         setupPages_();
@@ -353,7 +352,7 @@ public:
         if (dt > 0.25f) dt = 0.25f;
 
         if (router().current() == "physics") scenes_.activate("physics");
-        else scenes_.deactivate();
+        else scenes_.deactivate("physics");
         scenes_.tick(dt);
     }
 
@@ -365,10 +364,10 @@ private:
 
     void setupPages_() {
         auto musicBody = [this](components::StateView& st) -> Element {
-            State<int>& musicProgress_ = states().get<int>(pnd::g::musicProgress);
-            State<bool>& musicPlaying_ = states().get<bool>(pnd::g::musicPlaying);
+            State<int>& musicProgress_ = st.get<int>(pnd::music::progress);
+            State<bool>& musicPlaying_ = st.get<bool>(pnd::music::playing);
             State<std::string>& currentTrack_ =
-                states().get<std::string>(pnd::g::currentTrack);
+                st.get<std::string>(pnd::music::currentTrack);
             State<bool>& shuffle_ = st.get<bool>(pnd::music::shuffle);
             State<int>& repeat_ = st.get<int>(pnd::music::repeat);
             State<int>& volume_ = st.get<int>(pnd::music::volume);
@@ -724,6 +723,10 @@ private:
             skiff::components::state::of<bool>(pnd::music::shuffle, false),
             skiff::components::state::of<int>(pnd::music::repeat, 0),
             skiff::components::state::of<int>(pnd::music::volume, 70),
+            skiff::components::state::of<bool>(pnd::music::playing, false),
+            skiff::components::state::of<int>(pnd::music::progress, 0),
+            skiff::components::state::of<std::string>(
+                pnd::music::currentTrack, music_.current().path),
         }, musicBody);
         router().add("games", {}, gamesBody);
         physicsPage_ = &router().add("physics", {
@@ -770,38 +773,26 @@ private:
         });
     }
 
+    // Scene → 本页 State 投影。点击只调 physics_ 命令,不要反过来 set 这些键。
     void syncPhysicsUi_() {
         if (!physicsPage_) return;
         components::StateView& st = physicsPage_->stateView();
-        const int frame = (int)physics_.frame();
-        State<int>& frameSt = st.get<int>(pnd::phys::frame);
-        if (frameSt.get() != frame) frameSt.set(frame);
-        const bool paused = physics_.paused();
-        State<bool>& pausedSt = st.get<bool>(pnd::phys::paused);
-        if (pausedSt.get() != paused) pausedSt.set(paused);
-        const int shape = physics_.dropCircle() ? 1 : 0;
-        State<int>& shapeSt = st.get<int>(pnd::phys::shape);
-        if (shapeSt.get() != shape) shapeSt.set(shape);
+        st.get<int>(pnd::phys::frame).setIfChanged((int)physics_.frame());
+        st.get<bool>(pnd::phys::paused).setIfChanged(physics_.paused());
+        st.get<int>(pnd::phys::shape).setIfChanged(physics_.dropCircle() ? 1 : 0);
     }
 
     void syncMusicUi_() {
-        State<std::string>& track = states().get<std::string>(pnd::g::currentTrack);
-        if (track.get() != music_.current().path) {
-            track.set(music_.current().path);
-        }
-        State<bool>& playing = states().get<bool>(pnd::g::musicPlaying);
-        if (playing.get() != music_.playing()) playing.set(music_.playing());
-        State<int>& progress = states().get<int>(pnd::g::musicProgress);
-        if (progress.get() != music_.progress()) progress.set(music_.progress());
         if (!musicPage_) return;
         components::StateView& st = musicPage_->stateView();
-        State<bool>& shuffle = st.get<bool>(pnd::music::shuffle);
-        if (shuffle.get() != music_.shuffle()) shuffle.set(music_.shuffle());
-        const int repeat = music_.repeat() ? 1 : 0;
-        State<int>& repeatSt = st.get<int>(pnd::music::repeat);
-        if (repeatSt.get() != repeat) repeatSt.set(repeat);
-        State<int>& volume = st.get<int>(pnd::music::volume);
-        if (volume.get() != music_.volume()) volume.set(music_.volume());
+        const char* path = music_.current().path;
+        st.get<std::string>(pnd::music::currentTrack)
+            .setIfChanged(std::string(path ? path : ""));
+        st.get<bool>(pnd::music::playing).setIfChanged(music_.playing());
+        st.get<int>(pnd::music::progress).setIfChanged(music_.progress());
+        st.get<bool>(pnd::music::shuffle).setIfChanged(music_.shuffle());
+        st.get<int>(pnd::music::repeat).setIfChanged(music_.repeat() ? 1 : 0);
+        st.get<int>(pnd::music::volume).setIfChanged(music_.volume());
     }
 
     pnd::PlatformMusicSink musicSink_;

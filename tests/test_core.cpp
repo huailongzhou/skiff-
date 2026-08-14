@@ -575,6 +575,20 @@ static void test_backend_diff_taparea_callback() {
     CHECK(backend.updateCount() == 2);
 }
 
+// ---- State::setIfChanged:同值不 bump version ----
+static void test_state_set_if_changed() {
+    skiff::State<int> s(3);
+    CHECK(s.version() == 0);
+    s.setIfChanged(3);
+    CHECK(s.version() == 0);
+    CHECK(s.get() == 3);
+    s.setIfChanged(4);
+    CHECK(s.get() == 4);
+    CHECK(s.version() == 1);
+    s.set(4);  // set() 同值也会 bump
+    CHECK(s.version() == 2);
+}
+
 // ---- WatchView:State 版本变化才重建子树,set 同值也会触发版本更新 ----
 static void test_watch_view() {
     skiff::State<int> count(0);
@@ -942,6 +956,7 @@ int main() {
     test_router_dead_target();
     test_router_fallback();
     test_stateview();
+    test_state_set_if_changed();
     test_tabview_empty();
     test_tabview_fills_parent_height();
     test_tabview_first_default_bg();

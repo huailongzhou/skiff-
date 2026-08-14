@@ -7,8 +7,8 @@
 //
 // 具体应用 UI(如 PndUi)继承它,在构造函数里:
 //   states().create<T>(id, 初值)     注册全局状态(id 为 int,业务层用枚举)
-//   platform.declare(...) / platform.on(...)  声明能力、订阅事件
 //   router().add(...)                注册页面
+// 平台能力在应用胶水里 declare/on(如 pnd::bindPlatform),平台入口 registerExternal。
 // 平台入口处的调用不变:ui.render() / ui.bind(app)。
 #pragma once
 
@@ -61,7 +61,7 @@ public:
 
     // 批量注册全局状态:类型标签 + {键, 初值} 列表,如:
     //   globalStatesInit(skiff::components::state::BOOL,
-    //                    {{menuExpanded, false}, {musicPlaying, false}});
+    //                    {{menuExpanded, false}});
     //   globalStatesInit(skiff::components::state::INT,
     //                    {{brightness, 80}});
     // 键是 int(业务层用枚举)。标签与初值类型不匹配属于编程错误,直接终止。

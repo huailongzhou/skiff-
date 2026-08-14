@@ -1,6 +1,7 @@
-// SceneHost:管理一组无头场景,每帧只步进当前激活的那个。
+// SceneHost:管理一组无头场景。可同时激活多个(音乐后台常驻,物理仅前台步进)。
 #pragma once
 
+#include <cstddef>
 #include <cstring>
 #include <vector>
 
@@ -10,8 +11,6 @@ namespace app {
 
 class SceneHost {
 public:
-    SceneHost() : active_(0) {}
-
     void add(Scene& scene) { scenes_.push_back(&scene); }
 
     Scene* find(const char* name) const {
@@ -23,25 +22,51 @@ public:
         return 0;
     }
 
-    Scene* active() const { return active_; }
-
-    void activate(const char* name) {
-        Scene* next = name ? find(name) : 0;
-        if (active_ == next) return;
-        if (active_) active_->deactivate();
-        active_ = next;
-        if (active_) active_->activate();
+    bool isActive(const char* name) const {
+        Scene* s = find(name);
+        return s && indexOf_(active_, s) >= 0;
     }
 
-    void deactivate() { activate(0); }
+    // 加入激活集;已激活则忽略。
+    void activate(const char* name) {
+        Scene* s = find(name);
+        if (!s || indexOf_(active_, s) >= 0) return;
+        s->activate();
+        active_.push_back(s);
+    }
+
+    // 从激活集移除;name 为空则全部停掉。
+    void deactivate(const char* name = 0) {
+        if (!name) {
+            for (size_t i = 0; i < active_.size(); ++i) {
+                active_[i]->deactivate();
+            }
+            active_.clear();
+            return;
+        }
+        Scene* s = find(name);
+        const int i = s ? indexOf_(active_, s) : -1;
+        if (i < 0) return;
+        s->deactivate();
+        active_.erase(active_.begin() + static_cast<std::ptrdiff_t>(i));
+    }
 
     void tick(float dt) {
-        if (active_) active_->tick(dt);
+        for (size_t i = 0; i < active_.size(); ++i) {
+            active_[i]->tick(dt);
+        }
     }
 
 private:
+    static int indexOf_(const std::vector<Scene*>& v, Scene* s) {
+        for (size_t i = 0; i < v.size(); ++i) {
+            if (v[i] == s) return static_cast<int>(i);
+        }
+        return -1;
+    }
+
     std::vector<Scene*> scenes_;
-    Scene* active_;
+    std::vector<Scene*> active_;
 };
 
 } // namespace app
