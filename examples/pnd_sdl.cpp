@@ -362,8 +362,36 @@ private:
         states().get<std::string>(pnd::g::locale).set(next);
     }
 
+    // ---- 页面注册:各页面 body 见下方独立函数 ----
     void setupPages_() {
-        auto musicBody = [this](components::StateView& st) -> Element {
+        router().add("home", {}, homeBody_());
+        musicPage_ = &router().add("music", {
+            skiff::components::state::of<bool>(pnd::music::shuffle, false),
+            skiff::components::state::of<int>(pnd::music::repeat, 0),
+            skiff::components::state::of<int>(pnd::music::volume, 70),
+            skiff::components::state::of<bool>(pnd::music::playing, false),
+            skiff::components::state::of<int>(pnd::music::progress, 0),
+            skiff::components::state::of<std::string>(
+                pnd::music::currentTrack, music_.current().path),
+        }, musicBody_());
+        router().add("games", {}, gamesBody_());
+        physicsPage_ = &router().add("physics", {
+            skiff::components::state::of<int>(pnd::phys::frame, 0),
+            skiff::components::state::of<bool>(pnd::phys::paused, false),
+            skiff::components::state::of<int>(pnd::phys::shape, 0),
+        }, physicsBody_());
+        router().add("media", {}, mediaBody_());
+        router().add("apps", {}, appGridBody_());
+        router().add("settings", {
+            skiff::components::state::of<int>(pnd::settings::tab, 0),
+        }, settingsBody_());
+        router().fallback([this]() -> Element { return subPage(router()); });
+    }
+
+    // ---- 各页面 body:每页一个函数 ----
+
+    components::PageView::Body musicBody_() {
+        return [this](components::StateView& st) -> Element {
             State<int>& musicProgress_ = st.get<int>(pnd::music::progress);
             State<bool>& musicPlaying_ = st.get<bool>(pnd::music::playing);
             State<std::string>& currentTrack_ =
@@ -461,8 +489,10 @@ private:
                 }, 0).widthPct(100).expand(),
             }, 0).sizePct(100, 100).bg(kBg);
         };
+    }
 
-        auto mediaBody = [this](components::StateView&) -> Element {
+    components::PageView::Body mediaBody_() {
+        return [this](components::StateView&) -> Element {
             State<int>& category_ = states().get<int>(pnd::g::mediaCategory);
 
             auto makeList = [this](const std::vector<skiff::components::ListItem>& items) -> Element {
@@ -527,8 +557,10 @@ private:
                     .widthPct(100).expand(),
             }, 0).sizePct(100, 100).bg(kBg);
         };
+    }
 
-        auto physicsBody = [this](components::StateView& st) -> Element {
+    components::PageView::Body physicsBody_() {
+        return [this](components::StateView& st) -> Element {
             State<int>& frame = st.get<int>(pnd::phys::frame);
             State<bool>& paused = st.get<bool>(pnd::phys::paused);
             State<int>& shape = st.get<int>(pnd::phys::shape);
@@ -581,8 +613,10 @@ private:
                 }, 0).widthPct(100).expand(),
             }, 0).sizePct(100, 100).bg(kBg);
         };
+    }
 
-        auto gamesBody = [this](components::StateView&) -> Element {
+    components::PageView::Body gamesBody_() {
+        return [this](components::StateView&) -> Element {
             std::vector<skiff::components::ListItem> games = {
                 {SKIFF_TR(app_physics), SKIFF_TR(game_physics_sub),
                  [this] { router().push("physics"); }},
@@ -607,8 +641,10 @@ private:
                     .expand(),
             }, 0).sizePct(100, 100).bg(kBg);
         };
+    }
 
-        auto homeBody = [this](components::StateView&) -> Element {
+    components::PageView::Body homeBody_() {
+        return [this](components::StateView&) -> Element {
             Element topBar = statusBar();
 
             Element mainRow = skiff::HStack({
@@ -634,8 +670,10 @@ private:
                 bottomRow,
             }, 0).sizePct(100, 100).bg(kBg).pad(12).padTop(0);
         };
+    }
 
-        auto settingsBody = [this](components::StateView& st) -> Element {
+    components::PageView::Body settingsBody_() {
+        return [this](components::StateView& st) -> Element {
             State<int>& tab = st.get<int>(pnd::settings::tab);
             State<int>& brightness = states().get<int>(pnd::g::brightness);
             State<std::string>& locale = states().get<std::string>(pnd::g::locale);
@@ -672,8 +710,10 @@ private:
                     .widthPct(100).expand(),
             }, 0).sizePct(100, 100).bg(kBg);
         };
+    }
 
-        auto appGridBody = [this](components::StateView&) -> Element {
+    components::PageView::Body appGridBody_() {
+        return [this](components::StateView&) -> Element {
             using skiff::components::AppIcon;
             using skiff::components::AppGrid;
 
@@ -717,29 +757,6 @@ private:
                     .expand()
             }, 0).sizePct(100, 100).bg(kBg);
         };
-
-        router().add("home", {}, homeBody);
-        musicPage_ = &router().add("music", {
-            skiff::components::state::of<bool>(pnd::music::shuffle, false),
-            skiff::components::state::of<int>(pnd::music::repeat, 0),
-            skiff::components::state::of<int>(pnd::music::volume, 70),
-            skiff::components::state::of<bool>(pnd::music::playing, false),
-            skiff::components::state::of<int>(pnd::music::progress, 0),
-            skiff::components::state::of<std::string>(
-                pnd::music::currentTrack, music_.current().path),
-        }, musicBody);
-        router().add("games", {}, gamesBody);
-        physicsPage_ = &router().add("physics", {
-            skiff::components::state::of<int>(pnd::phys::frame, 0),
-            skiff::components::state::of<bool>(pnd::phys::paused, false),
-            skiff::components::state::of<int>(pnd::phys::shape, 0),
-        }, physicsBody);
-        router().add("media", {}, mediaBody);
-        router().add("apps", {}, appGridBody);
-        router().add("settings", {
-            skiff::components::state::of<int>(pnd::settings::tab, 0),
-        }, settingsBody);
-        router().fallback([this]() -> Element { return subPage(router()); });
     }
 
     void setupOverlay_() {
