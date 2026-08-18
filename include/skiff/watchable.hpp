@@ -4,6 +4,7 @@
 // State::set() 时只 patch 对应的已挂载节点,不重跑整页 body()。
 #pragma once
 
+#include <cstddef>
 #include <functional>
 #include <string>
 
@@ -22,6 +23,13 @@ public:
 
     // 所监听 State 的地址,App 用来把该 State 标成局部失效
     virtual const void* stateIdentity() const = 0;
+
+    // 多变量 Watch 覆盖这两个;默认只报告 stateIdentity()。
+    virtual size_t watchedStateCount() const { return 1; }
+    virtual const void* watchedStateAt(size_t i) const {
+        (void)i;
+        return stateIdentity();
+    }
 
     virtual bool isDirty() const = 0;
 

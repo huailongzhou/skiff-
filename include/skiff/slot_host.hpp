@@ -58,8 +58,20 @@ public:
     template <typename T, typename Fn>
     Element take(State<T>& state, Fn builder);
 
+    template <typename A, typename B, typename Fn>
+    Element take(State<A>& a, State<B>& b, Fn builder);
+
+    template <typename A, typename B, typename C, typename Fn>
+    Element take(State<A>& a, State<B>& b, State<C>& c, Fn builder);
+
     template <typename T, typename Fn>
     Slot bind(State<T>& state, Fn builder);
+
+    template <typename A, typename B, typename Fn>
+    Slot bind(State<A>& a, State<B>& b, Fn builder);
+
+    template <typename A, typename B, typename C, typename Fn>
+    Slot bind(State<A>& a, State<B>& b, State<C>& c, Fn builder);
 
 private:
     static SlotHost*& currentRef() {

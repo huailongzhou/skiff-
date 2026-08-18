@@ -302,7 +302,9 @@ public:
             if (watchables_[i] == &w) return;
         }
         watchables_.push_back(&w);
-        ++localOnlyCount_[w.stateIdentity()];
+        for (size_t i = 0; i < w.watchedStateCount(); ++i) {
+            ++localOnlyCount_[w.watchedStateAt(i)];
+        }
         w.setInvalidator([this] { invalidateLocal(); });
         Watchable* ptr = &w;
         w.setUnregister([this, ptr] { removeWatchable(ptr); });
@@ -355,11 +357,13 @@ private:
                 break;
             }
         }
-        const void* id = w->stateIdentity();
-        std::map<const void*, int>::iterator it = localOnlyCount_.find(id);
-        if (it != localOnlyCount_.end()) {
-            --it->second;
-            if (it->second <= 0) localOnlyCount_.erase(it);
+        for (size_t i = 0; i < w->watchedStateCount(); ++i) {
+            const void* id = w->watchedStateAt(i);
+            std::map<const void*, int>::iterator it = localOnlyCount_.find(id);
+            if (it != localOnlyCount_.end()) {
+                --it->second;
+                if (it->second <= 0) localOnlyCount_.erase(it);
+            }
         }
     }
 

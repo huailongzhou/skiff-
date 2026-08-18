@@ -409,14 +409,10 @@ private:
             });
 
             Element progressRow = skiff::Watch(
-                currentTrack_, [this, &musicProgress_](const std::string&) {
-                    const int duration = music_.current().durationSec;
-                    return skiff::Watch(
-                        musicProgress_, [this, duration](int p) {
-                            return musicProgressRow(p, duration, [this](int v) {
-                                music_.seek(v);
-                            });
-                        });
+                currentTrack_, musicProgress_,
+                [this](const std::string&, int p) {
+                    return musicProgressRow(p, music_.current().durationSec,
+                                            [this](int v) { music_.seek(v); });
                 });
 
             Element shuffleBtn = skiff::Watch(shuffle_, [this](bool on) {

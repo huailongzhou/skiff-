@@ -815,6 +815,82 @@ static void test_nested_watch() {
     CHECK(innerBuild == 2);
 }
 
+// ---- 双 State Watch:任一变化重建,不重跑 body ----
+static void test_watch_two_states() {
+    TestBackend backend;
+    skiff::State<int> a(1);
+    skiff::State<int> b(2);
+    int buildCount = 0;
+    int bodyCount = 0;
+
+    skiff::SlotHost host;
+    skiff::App app(backend, [&]() -> skiff::Element {
+        ++bodyCount;
+        skiff::SlotHost::Guard g(host);
+        return skiff::Watch(a, b, [&](int x, int y) -> skiff::Element {
+            ++buildCount;
+            return skiff::Text(std::to_string(x) + "," + std::to_string(y));
+        });
+    });
+    host.attach(app);
+    app.bind(a);
+    app.bind(b);
+    app.start();
+
+    CHECK(bodyCount == 1);
+    CHECK(buildCount == 1);
+
+    a.set(3);
+    app.update();
+    CHECK(bodyCount == 1);
+    CHECK(buildCount == 2);
+
+    b.set(4);
+    app.update();
+    CHECK(bodyCount == 1);
+    CHECK(buildCount == 3);
+
+    backend.resetCounts();
+    a.set(3);  // 同值仍 bump version
+    app.update();
+    CHECK(bodyCount == 1);
+    CHECK(buildCount == 4);
+    CHECK(backend.updateCount() == 1);
+}
+
+// ---- 三 State Watch:第三个变化也只 patch ----
+static void test_watch_three_states() {
+    TestBackend backend;
+    skiff::State<int> a(0);
+    skiff::State<bool> on(true);
+    skiff::State<std::string> name("x");
+    int buildCount = 0;
+    int bodyCount = 0;
+
+    skiff::SlotHost host;
+    skiff::App app(backend, [&]() -> skiff::Element {
+        ++bodyCount;
+        skiff::SlotHost::Guard g(host);
+        return skiff::Watch(
+            a, on, name, [&](int n, bool flag, const std::string& s) -> skiff::Element {
+                ++buildCount;
+                return skiff::Text(std::to_string(n) + (flag ? "+" : "-") + s);
+            });
+    });
+    host.attach(app);
+    app.bind(a);
+    app.bind(on);
+    app.bind(name);
+    app.start();
+    CHECK(bodyCount == 1);
+    CHECK(buildCount == 1);
+
+    name.set("y");
+    app.update();
+    CHECK(bodyCount == 1);
+    CHECK(buildCount == 2);
+}
+
 // ---- 整页失效会清 Watch 缓存(语言切换等) ----
 static void test_root_clears_watch_cache() {
     TestBackend backend;
@@ -976,6 +1052,8 @@ int main() {
     test_slot_bind_handle();
     test_inline_watch();
     test_nested_watch();
+    test_watch_two_states();
+    test_watch_three_states();
     test_root_clears_watch_cache();
     test_i18n();
     test_platform_invoke_later();

@@ -152,7 +152,7 @@ public:
     // 本页状态的持有者/管理器
     StateView& stateView() { return stateView_; }
 
-    // 渲染页面:执行 body;body 内可写 Watch(state, builder),按调用顺序复用槽位
+    // 渲染页面:执行 body;body 内可写 Watch(state, builder) 或 Watch(a, b, builder)
     const Element& render(Body body) {
         SlotHost::Guard g(slots_);
         element_ = body(stateView_);
