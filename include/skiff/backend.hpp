@@ -338,6 +338,10 @@ public:
                 Watchable* w = watchables_[i];
                 if (!w->isDirty()) continue;
                 backend_.patch(w->watchKey(), w->rebuild());
+                // rebuild 内嵌套槽位的清扫可能注销了 i 之前的元素,
+                // 位置 i 会换上未访问过的元素,回退一步重扫
+                if (i > 0 && (i >= watchables_.size() || watchables_[i] != w))
+                    --i;
             }
         }
         updating_ = false;
@@ -379,12 +383,22 @@ private:
 
 inline void SlotHost::attach(App& app) {
     app_ = &app;
-    for (size_t i = 0; i < ordered_.size(); ++i) app.watchLocal(*ordered_[i]);
+    for (std::map<std::string, std::vector<SlotEntry> >::iterator it =
+             slots_.begin();
+         it != slots_.end(); ++it) {
+        for (size_t i = 0; i < it->second.size(); ++i)
+            app.watchLocal(*it->second[i].watch);
+    }
     for (size_t i = 0; i < named_.size(); ++i) app.watchLocal(*named_[i]);
 }
 
 inline void SlotHost::clearCaches() {
-    for (size_t i = 0; i < ordered_.size(); ++i) ordered_[i]->clearCache();
+    for (std::map<std::string, std::vector<SlotEntry> >::iterator it =
+             slots_.begin();
+         it != slots_.end(); ++it) {
+        for (size_t i = 0; i < it->second.size(); ++i)
+            it->second[i].watch->clearCache();
+    }
     for (size_t i = 0; i < named_.size(); ++i) named_[i]->clearCache();
 }
 

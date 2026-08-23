@@ -929,6 +929,254 @@ static void test_root_clears_watch_cache() {
     CHECK(watchBuilds == 3);
 }
 
+// ---- 条件分支里的 Watch:分支消失不错位、槽位被清扫并注销 ----
+static void test_watch_conditional_branch() {
+    TestBackend backend;
+    skiff::State<int> a(0);
+    skiff::State<int> b(0);
+    skiff::State<int> root(1);
+    int aBuilds = 0;
+    int bBuilds = 0;
+    int bodyCount = 0;
+
+    skiff::SlotHost host;
+    skiff::App app(backend, [&]() -> skiff::Element {
+        ++bodyCount;
+        skiff::SlotHost::Guard g(host);
+        std::vector<skiff::Element> kids;
+        if (root.get() != 0) {
+            kids.push_back(skiff::Watch(a, [&](int v) -> skiff::Element {
+                ++aBuilds;
+                return skiff::Text("a" + std::to_string(v));
+            }));
+        }
+        kids.push_back(skiff::Watch(b, [&](int v) -> skiff::Element {
+            ++bBuilds;
+            return skiff::Text("b" + std::to_string(v));
+        }));
+        kids.push_back(skiff::Text(std::to_string(root.get())));
+        return skiff::VStack(kids, 0);
+    });
+    host.attach(app);
+    app.bind(a);
+    app.bind(b);
+    app.bind(root);
+    app.start();
+    CHECK(bodyCount == 1);
+    CHECK(aBuilds == 1);
+    CHECK(bBuilds == 1);
+
+    // 两个 Watch 都走局部 patch
+    b.set(1);
+    app.update();
+    CHECK(bodyCount == 1);
+    CHECK(bBuilds == 2);
+    a.set(1);
+    app.update();
+    CHECK(bodyCount == 1);
+    CHECK(aBuilds == 2);
+
+    // 关掉分支:root 未 watchLocal → 整页重建;a 的槽本轮未命中,被清扫
+    root.set(0);
+    app.update();
+    CHECK(bodyCount == 2);
+    CHECK(aBuilds == 2);  // a 不再构建
+    CHECK(bBuilds == 3);
+
+    // 分支消失后 set(a):a 已注销局部订阅 → 整页重建,而不是 patch 幽灵节点
+    a.set(2);
+    app.update();
+    CHECK(bodyCount == 3);
+    CHECK(aBuilds == 2);
+    CHECK(bBuilds == 4);  // 整页重建清缓存,b 跟着重建
+
+    // 重新打开分支:a 的槽重建,用最新值;之后 set(a) 恢复局部 patch
+    root.set(1);
+    app.update();
+    CHECK(bodyCount == 4);
+    CHECK(aBuilds == 3);
+    CHECK(bBuilds == 5);
+    a.set(3);
+    app.update();
+    CHECK(bodyCount == 4);
+    CHECK(aBuilds == 4);
+}
+
+// ---- Watch 换序:槽位按 State 身份复用,与调用顺序无关 ----
+static void test_watch_reorder() {
+    TestBackend backend;
+    skiff::State<int> a(0);
+    skiff::State<int> b(0);
+    skiff::State<int> root(1);
+    int aBuilds = 0;
+    int bBuilds = 0;
+    int bodyCount = 0;
+
+    skiff::SlotHost host;
+    skiff::App app(backend, [&]() -> skiff::Element {
+        ++bodyCount;
+        skiff::SlotHost::Guard g(host);
+        std::vector<skiff::Element> kids;
+        if (root.get() != 0) {
+            kids.push_back(skiff::Watch(a, [&](int v) -> skiff::Element {
+                ++aBuilds;
+                return skiff::Text("a" + std::to_string(v));
+            }));
+            kids.push_back(skiff::Watch(b, [&](int v) -> skiff::Element {
+                ++bBuilds;
+                return skiff::Text("b" + std::to_string(v));
+            }));
+        } else {
+            kids.push_back(skiff::Watch(b, [&](int v) -> skiff::Element {
+                ++bBuilds;
+                return skiff::Text("b" + std::to_string(v));
+            }));
+            kids.push_back(skiff::Watch(a, [&](int v) -> skiff::Element {
+                ++aBuilds;
+                return skiff::Text("a" + std::to_string(v));
+            }));
+        }
+        kids.push_back(skiff::Text(std::to_string(root.get())));
+        return skiff::VStack(kids, 0);
+    });
+    host.attach(app);
+    app.bind(a);
+    app.bind(b);
+    app.bind(root);
+    app.start();
+    CHECK(aBuilds == 1);
+    CHECK(bBuilds == 1);
+
+    // 换序整页重建后,set(b) 仍只重建 b 的 builder(不错位到 a 的槽)
+    root.set(0);
+    app.update();
+    CHECK(bodyCount == 2);
+    CHECK(aBuilds == 2);
+    CHECK(bBuilds == 2);
+
+    b.set(1);
+    app.update();
+    CHECK(bodyCount == 2);
+    CHECK(aBuilds == 2);
+    CHECK(bBuilds == 3);
+
+    a.set(1);
+    app.update();
+    CHECK(bodyCount == 2);
+    CHECK(aBuilds == 3);
+    CHECK(bBuilds == 3);
+}
+
+// ---- 枚举键 Watch:从当前页 StateView 解析,局部 patch 不重跑 body ----
+static void test_watch_enum_key() {
+    TestBackend backend;
+    enum { k_count = 0, k_label };
+    comp::PageView page("p", {
+        comp::state::of<int>(k_count, 0),
+        comp::state::of<std::string>(k_label, std::string("x")),
+    });
+    int buildCount = 0;
+    int bodyCount = 0;
+
+    skiff::App app(backend, [&]() -> skiff::Element {
+        ++bodyCount;
+        return page.render([&](comp::StateView&) -> skiff::Element {
+            return skiff::VStack({
+                skiff::Watch<int>(k_count, [&](int c) -> skiff::Element {
+                    ++buildCount;
+                    return skiff::Text(std::to_string(c));
+                }),
+            }, 0);
+        });
+    });
+    page.bind(app);
+    app.start();
+    CHECK(bodyCount == 1);
+    CHECK(buildCount == 1);
+
+    page.stateView().get<int>(k_count).set(5);
+    app.update();
+    CHECK(bodyCount == 1);
+    CHECK(buildCount == 2);
+}
+
+// ---- 枚举键 Watch:无页上下文时回退全局 StateView(overlay 场景) ----
+static void test_watch_enum_global_fallback() {
+    TestBackend backend;
+    comp::StateView* prevGlobal = comp::StateView::global();
+    comp::StateView globalStates;
+    globalStates.create<bool>(7, false);
+    comp::StateView::setGlobal(&globalStates);
+
+    int buildCount = 0;
+    int bodyCount = 0;
+    skiff::SlotHost host;
+    skiff::App app(backend, [&]() -> skiff::Element {
+        ++bodyCount;
+        skiff::SlotHost::Guard g(host);
+        return skiff::Watch<bool>(7, [&](bool on) -> skiff::Element {
+            ++buildCount;
+            return skiff::Text(on ? "on" : "off");
+        });
+    });
+    host.attach(app);
+    globalStates.bindAll(app);
+    app.start();
+    CHECK(buildCount == 1);
+
+    globalStates.get<bool>(7).set(true);
+    app.update();
+    CHECK(bodyCount == 1);
+    CHECK(buildCount == 2);
+
+    comp::StateView::setGlobal(prevGlobal);
+}
+
+// ---- 嵌套枚举键 Watch:patch 路径(无页上下文)也能解析页级状态 ----
+static void test_watch_enum_nested_patch() {
+    TestBackend backend;
+    enum { k_outer = 0, k_inner };
+    comp::PageView page("p", {
+        comp::state::of<int>(k_outer, 0),
+        comp::state::of<int>(k_inner, 0),
+    });
+    int outerBuilds = 0;
+    int innerBuilds = 0;
+    int bodyCount = 0;
+
+    skiff::App app(backend, [&]() -> skiff::Element {
+        ++bodyCount;
+        return page.render([&](comp::StateView&) -> skiff::Element {
+            return skiff::Watch<int>(k_outer, [&](int o) -> skiff::Element {
+                ++outerBuilds;
+                return skiff::Watch<int>(k_inner, [&](int i) -> skiff::Element {
+                    ++innerBuilds;
+                    return skiff::Text(std::to_string(o) + "," +
+                                       std::to_string(i));
+                });
+            });
+        });
+    });
+    page.bind(app);
+    app.start();
+    CHECK(outerBuilds == 1);
+    CHECK(innerBuilds == 1);
+
+    // 外层重建发生在 patch 路径;嵌套的 Watch<int>(k_inner) 依赖
+    // WatchView 保存的页上下文解析,且内层槽位复用不重建
+    page.stateView().get<int>(k_outer).set(1);
+    app.update();
+    CHECK(bodyCount == 1);
+    CHECK(outerBuilds == 2);
+    CHECK(innerBuilds == 1);
+
+    page.stateView().get<int>(k_inner).set(2);
+    app.update();
+    CHECK(bodyCount == 1);
+    CHECK(outerBuilds == 2);
+    CHECK(innerBuilds == 2);
+}
+
 // ---- i18n 框架层:注册目录 / 切换语言 / 按下标查找 ----
 static void test_i18n() {
     enum { k_hi = 0, k_bye, k_count };
@@ -1055,6 +1303,11 @@ int main() {
     test_watch_two_states();
     test_watch_three_states();
     test_root_clears_watch_cache();
+    test_watch_conditional_branch();
+    test_watch_reorder();
+    test_watch_enum_key();
+    test_watch_enum_global_fallback();
+    test_watch_enum_nested_patch();
     test_i18n();
     test_platform_invoke_later();
     test_canvas_element();

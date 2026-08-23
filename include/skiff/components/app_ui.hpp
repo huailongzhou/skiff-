@@ -46,8 +46,13 @@ public:
     // platform:平台能力接口(由平台入口持有,AppUi 仅引用)
     // initialRoute:初始路由名(须有对应 add() 的页面,否则走 fallback)
     explicit AppUi(Platform& platform, std::string initialRoute = "home")
-        : platform_(platform), router_(std::move(initialRoute)) {}
-    virtual ~AppUi() {}
+        : platform_(platform), router_(std::move(initialRoute)) {
+        // 登记全局 StateView,Watch<T>(key, ...) 在页级未命中时回退到这里
+        StateView::setGlobal(&states_);
+    }
+    virtual ~AppUi() {
+        if (StateView::global() == &states_) StateView::setGlobal(nullptr);
+    }
 
     // 渲染当前页面(供 App 的 body 使用)
     Element render() { return router_.render(); }

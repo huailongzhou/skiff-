@@ -59,15 +59,23 @@ public:
         entries_.push_back(std::unique_ptr<Entry>(new TypedEntry<T>(id, s)));
     }
 
-    // 按键取用状态;找不到或类型不匹配直接终止(编程错误,尽早暴露)
+    // 按键查找状态;找不到或类型不匹配返回 nullptr(供作用域回退查找用)
     template <typename T>
-    State<T>& get(int id) {
+    State<T>* find(int id) {
         for (size_t i = 0; i < entries_.size(); ++i) {
             if (entries_[i]->id == id) {
                 TypedEntry<T>* t = dynamic_cast<TypedEntry<T>*>(entries_[i].get());
-                if (t != nullptr) return *t->state;
+                if (t != nullptr) return t->state;
             }
         }
+        return nullptr;
+    }
+
+    // 按键取用状态;找不到或类型不匹配直接终止(编程错误,尽早暴露)
+    template <typename T>
+    State<T>& get(int id) {
+        State<T>* s = find<T>(id);
+        if (s != nullptr) return *s;
         std::fprintf(stderr, "StateView: state %d not found or type mismatch\n", id);
         std::abort();
     }
@@ -75,6 +83,24 @@ public:
     void bindAll(App& app) {
         for (size_t i = 0; i < entries_.size(); ++i) entries_[i]->bind(app);
     }
+
+    // 渲染上下文:PageView::render 压入本页 StateView,AppUi 构造时登记全局 StateView。
+    // Watch<T>(key, builder) 按 当前页 → 全局 的顺序解析 key(同值枚举键页级优先)。
+    static StateView* current() { return currentRef(); }
+    static StateView* global() { return globalRef(); }
+    static void setGlobal(StateView* sv) { globalRef() = sv; }
+
+    // 允许传 nullptr:把当前上下文清空(如 patch 路径里没有页上下文)
+    class Guard {
+    public:
+        explicit Guard(StateView* sv) : prev_(StateView::currentRef()) {
+            StateView::currentRef() = sv;
+        }
+        ~Guard() { StateView::currentRef() = prev_; }
+
+    private:
+        StateView* prev_;
+    };
 
 private:
     struct Entry {
@@ -95,6 +121,15 @@ private:
         ~TypedEntry() { if (owned) delete state; }
         void bind(App& app) override { app.bind(*state); }
     };
+
+    static StateView*& currentRef() {
+        static StateView* p = nullptr;
+        return p;
+    }
+    static StateView*& globalRef() {
+        static StateView* p = nullptr;
+        return p;
+    }
 
     std::vector<std::unique_ptr<Entry> > entries_;
 };
@@ -152,9 +187,10 @@ public:
     // 本页状态的持有者/管理器
     StateView& stateView() { return stateView_; }
 
-    // 渲染页面:执行 body;body 内可写 Watch(state, builder) 或 Watch(a, b, builder)
+    // 渲染页面:执行 body;body 内可写 Watch(state, builder) 或 Watch<T>(key, builder)
     const Element& render(Body body) {
         SlotHost::Guard g(slots_);
+        StateView::Guard sg(&stateView_);
         element_ = body(stateView_);
         return element_;
     }

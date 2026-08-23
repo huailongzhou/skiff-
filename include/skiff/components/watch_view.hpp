@@ -3,7 +3,10 @@
 // 一般不直接持有 WatchView。页面 body / overlay 里写:
 //   Watch(state, [](const T& v) { return Text(...); })
 //   Watch(a, b, [](const A& x, const B& y) { return ...; })  // 任一变化即重建
-// SlotHost(PageView / overlay)按调用顺序复用实例,set() 只 patch 对应节点。
+//   Watch<bool>(pnd::music::playing, [](bool on) { ...; })   // 枚举键写法:
+//   // 从当前页 StateView 解析,未命中回退全局 StateView,内部与上面等价
+// SlotHost(PageView / overlay)按"State 集合 key + 同 key 序号"复用实例,
+// 与调用顺序无关(if/for 安全),set() 只 patch 对应节点。
 //
 // 仍可手动构造 WatchView + App::watchLocal,供测试或自定义槽位。
 // Watch() 必须在 SlotHost::Guard 内调用(PageView::render 已推入)。
@@ -22,6 +25,7 @@
 #include "../slot_host.hpp"
 #include "../state.hpp"
 #include "../watchable.hpp"
+#include "page_view.hpp"
 
 namespace skiff {
 namespace components {
@@ -35,10 +39,13 @@ inline std::string nextWatchKey() {
 template <typename T>
 class WatchView : public ElementView, public Watchable {
 public:
-    WatchView(State<T>& state, std::function<Element(const T&)> builder)
+    // ctx:枚举键 Watch 的解析上下文,默认取构造时的当前页 StateView;
+    // build 时压栈,保证 patch 路径里嵌套的 Watch<U>(key, ...) 仍能解析页级状态
+    WatchView(State<T>& state, std::function<Element(const T&)> builder,
+              StateView* ctx = StateView::current())
         : ElementView(), Watchable(), state_(state), builder_(std::move(builder)),
           lastVersion_(static_cast<uint64_t>(-1)), dirty_(true), subId_(0),
-          key_(nextWatchKey()) {
+          key_(nextWatchKey()), ctx_(ctx) {
         subscribe_();
     }
 
@@ -51,7 +58,7 @@ public:
           builder_(std::move(o.builder_)), lastVersion_(o.lastVersion_),
           cached_(std::move(o.cached_)), dirty_(o.dirty_), subId_(0),
           key_(o.key_.empty() ? nextWatchKey() : std::move(o.key_)),
-          nested_(std::move(o.nested_)) {
+          nested_(std::move(o.nested_)), ctx_(o.ctx_) {
         o.dirty_ = false;
         if (o.subId_ != 0) {
             o.state_.unsubscribe(o.subId_);
@@ -69,10 +76,17 @@ public:
         runUnregister();
     }
 
+    // 槽位复用时刷新 builder:同一 State 的新一轮渲染可能带来新闭包,
+    // 避免沿用过期捕获。不强制重建,缓存仍按 State 版本判断。
+    void setBuilder(std::function<Element(const T&)> builder) {
+        builder_ = std::move(builder);
+    }
+
     Element build() const override {
         const uint64_t current = state_.version();
         if (dirty_ || current != lastVersion_) {
             SlotHost::Guard g(nested_);
+            StateView::Guard sg(ctx_);
             cached_ = builder_(state_.get());
             cached_.options.keyId = key_;
             lastVersion_ = current;
@@ -120,6 +134,7 @@ private:
     uint64_t subId_;
     std::string key_;
     mutable SlotHost nested_;
+    StateView* ctx_;
 };
 
 // 双 State:任一 version 变化即重建。两个 State 都标成本地失效。
@@ -127,10 +142,11 @@ template <typename A, typename B>
 class WatchView2 : public ElementView, public Watchable {
 public:
     WatchView2(State<A>& a, State<B>& b,
-               std::function<Element(const A&, const B&)> builder)
+               std::function<Element(const A&, const B&)> builder,
+               StateView* ctx = StateView::current())
         : ElementView(), Watchable(), a_(a), b_(b), builder_(std::move(builder)),
           lastA_(static_cast<uint64_t>(-1)), lastB_(static_cast<uint64_t>(-1)),
-          dirty_(true), subA_(0), subB_(0), key_(nextWatchKey()) {
+          dirty_(true), subA_(0), subB_(0), key_(nextWatchKey()), ctx_(ctx) {
         subscribe_();
     }
 
@@ -143,7 +159,7 @@ public:
           builder_(std::move(o.builder_)), lastA_(o.lastA_), lastB_(o.lastB_),
           cached_(std::move(o.cached_)), dirty_(o.dirty_), subA_(0), subB_(0),
           key_(o.key_.empty() ? nextWatchKey() : std::move(o.key_)),
-          nested_(std::move(o.nested_)) {
+          nested_(std::move(o.nested_)), ctx_(o.ctx_) {
         o.dirty_ = false;
         if (o.subA_ != 0) {
             o.a_.unsubscribe(o.subA_);
@@ -169,11 +185,16 @@ public:
         runUnregister();
     }
 
+    void setBuilder(std::function<Element(const A&, const B&)> builder) {
+        builder_ = std::move(builder);
+    }
+
     Element build() const override {
         const uint64_t va = a_.version();
         const uint64_t vb = b_.version();
         if (dirty_ || va != lastA_ || vb != lastB_) {
             SlotHost::Guard g(nested_);
+            StateView::Guard sg(ctx_);
             cached_ = builder_(a_.get(), b_.get());
             cached_.options.keyId = key_;
             lastA_ = va;
@@ -234,6 +255,7 @@ private:
     uint64_t subB_;
     std::string key_;
     mutable SlotHost nested_;
+    StateView* ctx_;
 };
 
 // 三 State:任一 version 变化即重建。
@@ -241,11 +263,13 @@ template <typename A, typename B, typename C>
 class WatchView3 : public ElementView, public Watchable {
 public:
     WatchView3(State<A>& a, State<B>& b, State<C>& c,
-               std::function<Element(const A&, const B&, const C&)> builder)
+               std::function<Element(const A&, const B&, const C&)> builder,
+               StateView* ctx = StateView::current())
         : ElementView(), Watchable(), a_(a), b_(b), c_(c),
           builder_(std::move(builder)), lastA_(static_cast<uint64_t>(-1)),
           lastB_(static_cast<uint64_t>(-1)), lastC_(static_cast<uint64_t>(-1)),
-          dirty_(true), subA_(0), subB_(0), subC_(0), key_(nextWatchKey()) {
+          dirty_(true), subA_(0), subB_(0), subC_(0), key_(nextWatchKey()),
+          ctx_(ctx) {
         subscribe_();
     }
 
@@ -259,7 +283,7 @@ public:
           lastC_(o.lastC_), cached_(std::move(o.cached_)), dirty_(o.dirty_),
           subA_(0), subB_(0), subC_(0),
           key_(o.key_.empty() ? nextWatchKey() : std::move(o.key_)),
-          nested_(std::move(o.nested_)) {
+          nested_(std::move(o.nested_)), ctx_(o.ctx_) {
         o.dirty_ = false;
         if (o.subA_ != 0) {
             o.a_.unsubscribe(o.subA_);
@@ -293,12 +317,18 @@ public:
         runUnregister();
     }
 
+    void setBuilder(
+        std::function<Element(const A&, const B&, const C&)> builder) {
+        builder_ = std::move(builder);
+    }
+
     Element build() const override {
         const uint64_t va = a_.version();
         const uint64_t vb = b_.version();
         const uint64_t vc = c_.version();
         if (dirty_ || va != lastA_ || vb != lastB_ || vc != lastC_) {
             SlotHost::Guard g(nested_);
+            StateView::Guard sg(ctx_);
             cached_ = builder_(a_.get(), b_.get(), c_.get());
             cached_.options.keyId = key_;
             lastA_ = va;
@@ -368,6 +398,7 @@ private:
     uint64_t subC_;
     std::string key_;
     mutable SlotHost nested_;
+    StateView* ctx_;
 };
 
 } // namespace components
@@ -382,48 +413,80 @@ inline SlotHost& requireWatchHost() {
     return *host;
 }
 
+// 槽位复用:key 由所监听 State 的地址组成,同一 key 在本轮渲染里的第 N 次
+// Watch 复用该 key 的第 N 个槽。key 相同则 State 相同、类型必然相同,static_cast 安全。
+// 复用时刷新 builder(闭包可能捕获了新的上下文),缓存仍按 State 版本判断。
 template <typename T, typename Fn>
 inline Element SlotHost::take(State<T>& state, Fn builder) {
-    if (index_ < ordered_.size()) {
-        Watchable* b = ordered_[index_].get();
-        ++index_;
-        return b->rebuild();
+    const std::string key = keyOf(static_cast<const void*>(&state));
+    const size_t ord = ordinals_[key]++;
+    std::vector<SlotEntry>& vec = slots_[key];
+    if (ord < vec.size()) {
+        SlotEntry& e = vec[ord];
+        e.touched = true;
+        components::WatchView<T>* v =
+            static_cast<components::WatchView<T>*>(e.watch.get());
+        v->setBuilder(std::function<Element(const T&)>(std::move(builder)));
+        return v->rebuild();
     }
     components::WatchView<T>* v = new components::WatchView<T>(
         state, std::function<Element(const T&)>(std::move(builder)));
-    ordered_.push_back(std::unique_ptr<Watchable>(v));
-    ++index_;
+    SlotEntry e;
+    e.watch.reset(v);
+    e.touched = true;
+    vec.push_back(std::move(e));
     adopt(v);
     return v->build();
 }
 
 template <typename A, typename B, typename Fn>
 inline Element SlotHost::take(State<A>& a, State<B>& b, Fn builder) {
-    if (index_ < ordered_.size()) {
-        Watchable* w = ordered_[index_].get();
-        ++index_;
-        return w->rebuild();
+    const std::string key =
+        keyOf(static_cast<const void*>(&a), static_cast<const void*>(&b));
+    const size_t ord = ordinals_[key]++;
+    std::vector<SlotEntry>& vec = slots_[key];
+    if (ord < vec.size()) {
+        SlotEntry& e = vec[ord];
+        e.touched = true;
+        components::WatchView2<A, B>* v =
+            static_cast<components::WatchView2<A, B>*>(e.watch.get());
+        v->setBuilder(
+            std::function<Element(const A&, const B&)>(std::move(builder)));
+        return v->rebuild();
     }
     components::WatchView2<A, B>* v = new components::WatchView2<A, B>(
         a, b, std::function<Element(const A&, const B&)>(std::move(builder)));
-    ordered_.push_back(std::unique_ptr<Watchable>(v));
-    ++index_;
+    SlotEntry e;
+    e.watch.reset(v);
+    e.touched = true;
+    vec.push_back(std::move(e));
     adopt(v);
     return v->build();
 }
 
 template <typename A, typename B, typename C, typename Fn>
 inline Element SlotHost::take(State<A>& a, State<B>& b, State<C>& c, Fn builder) {
-    if (index_ < ordered_.size()) {
-        Watchable* w = ordered_[index_].get();
-        ++index_;
-        return w->rebuild();
+    const std::string key =
+        keyOf(static_cast<const void*>(&a), static_cast<const void*>(&b),
+              static_cast<const void*>(&c));
+    const size_t ord = ordinals_[key]++;
+    std::vector<SlotEntry>& vec = slots_[key];
+    if (ord < vec.size()) {
+        SlotEntry& e = vec[ord];
+        e.touched = true;
+        components::WatchView3<A, B, C>* v =
+            static_cast<components::WatchView3<A, B, C>*>(e.watch.get());
+        v->setBuilder(std::function<Element(const A&, const B&, const C&)>(
+            std::move(builder)));
+        return v->rebuild();
     }
     components::WatchView3<A, B, C>* v = new components::WatchView3<A, B, C>(
         a, b, c,
         std::function<Element(const A&, const B&, const C&)>(std::move(builder)));
-    ordered_.push_back(std::unique_ptr<Watchable>(v));
-    ++index_;
+    SlotEntry e;
+    e.watch.reset(v);
+    e.touched = true;
+    vec.push_back(std::move(e));
     adopt(v);
     return v->build();
 }
@@ -475,6 +538,39 @@ inline Element Watch(State<A>& a, State<B>& b, State<C>& c, Fn builder) {
     return requireWatchHost().take(a, b, c, std::move(builder));
 }
 
+// 枚举键解析:当前页 StateView 优先,未命中回退全局 StateView(AppUi 登记)。
+// 键只在单个 StateView 内唯一,页级与全局同值的枚举键按此顺序区分。
+template <typename T>
+inline State<T>& resolveWatchState(int key) {
+    if (components::StateView* cur = components::StateView::current()) {
+        if (State<T>* s = cur->find<T>(key)) return *s;
+    }
+    if (components::StateView* g = components::StateView::global()) {
+        if (State<T>* s = g->find<T>(key)) return *s;
+    }
+    std::fprintf(stderr, "skiff::Watch: 状态键 %d 不存在或类型不匹配\n", key);
+    std::abort();
+}
+
+// 枚举键写法:Watch<bool>(pnd::music::playing, [](bool on) { ... })
+// 省掉 body 开头一排 st.get<T>(...);内部与 Watch(State<T>&, ...) 完全等价。
+template <typename T, typename Fn>
+inline Element Watch(int key, Fn builder) {
+    return Watch(resolveWatchState<T>(key), std::move(builder));
+}
+
+template <typename A, typename B, typename Fn>
+inline Element Watch(int keyA, int keyB, Fn builder) {
+    return Watch(resolveWatchState<A>(keyA), resolveWatchState<B>(keyB),
+                 std::move(builder));
+}
+
+template <typename A, typename B, typename C, typename Fn>
+inline Element Watch(int keyA, int keyB, int keyC, Fn builder) {
+    return Watch(resolveWatchState<A>(keyA), resolveWatchState<B>(keyB),
+                 resolveWatchState<C>(keyC), std::move(builder));
+}
+
 namespace components {
 
 template <typename T, typename Fn>
@@ -490,6 +586,21 @@ inline Element Watch(State<A>& a, State<B>& b, Fn builder) {
 template <typename A, typename B, typename C, typename Fn>
 inline Element Watch(State<A>& a, State<B>& b, State<C>& c, Fn builder) {
     return skiff::Watch(a, b, c, std::move(builder));
+}
+
+template <typename T, typename Fn>
+inline Element Watch(int key, Fn builder) {
+    return skiff::Watch<T>(key, std::move(builder));
+}
+
+template <typename A, typename B, typename Fn>
+inline Element Watch(int keyA, int keyB, Fn builder) {
+    return skiff::Watch<A, B>(keyA, keyB, std::move(builder));
+}
+
+template <typename A, typename B, typename C, typename Fn>
+inline Element Watch(int keyA, int keyB, int keyC, Fn builder) {
+    return skiff::Watch<A, B, C>(keyA, keyB, keyC, std::move(builder));
 }
 
 } // namespace components

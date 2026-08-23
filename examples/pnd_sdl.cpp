@@ -391,50 +391,46 @@ private:
     // ---- 各页面 body:每页一个函数 ----
 
     components::PageView::Body musicBody_() {
-        return [this](components::StateView& st) -> Element {
-            State<int>& musicProgress_ = st.get<int>(pnd::music::progress);
-            State<bool>& musicPlaying_ = st.get<bool>(pnd::music::playing);
-            State<std::string>& currentTrack_ =
-                st.get<std::string>(pnd::music::currentTrack);
-            State<bool>& shuffle_ = st.get<bool>(pnd::music::shuffle);
-            State<int>& repeat_ = st.get<int>(pnd::music::repeat);
-            State<int>& volume_ = st.get<int>(pnd::music::volume);
+        return [this](components::StateView&) -> Element {
+            Element album = skiff::Watch<std::string>(
+                pnd::music::currentTrack, [this](const std::string&) {
+                    return musicAlbumArt(music_.current());
+                });
 
-            Element album = skiff::Watch(currentTrack_, [this](const std::string&) {
-                return musicAlbumArt(music_.current());
-            });
+            Element titles = skiff::Watch<std::string>(
+                pnd::music::currentTrack, [this](const std::string&) {
+                    return musicTitleBlock(music_.current());
+                });
 
-            Element titles = skiff::Watch(currentTrack_, [this](const std::string&) {
-                return musicTitleBlock(music_.current());
-            });
-
-            Element progressRow = skiff::Watch(
-                currentTrack_, musicProgress_,
+            Element progressRow = skiff::Watch<std::string, int>(
+                pnd::music::currentTrack, pnd::music::progress,
                 [this](const std::string&, int p) {
                     return musicProgressRow(p, music_.current().durationSec,
                                             [this](int v) { music_.seek(v); });
                 });
 
-            Element shuffleBtn = skiff::Watch(shuffle_, [this](bool on) {
-                return musicIconBtn(ICON_SHUFFLE, on ? kMusic : kLo, 48,
-                                    [this] { music_.toggleShuffle(); });
-            });
+            Element shuffleBtn = skiff::Watch<bool>(
+                pnd::music::shuffle, [this](bool on) {
+                    return musicIconBtn(ICON_SHUFFLE, on ? kMusic : kLo, 48,
+                                        [this] { music_.toggleShuffle(); });
+                });
 
             Element prevBtn = musicIconBtn(
                 ICON_PREV, kHi, 52, [this] { music_.prev(); });
 
-            Element playBtn = skiff::Watch(
-                musicPlaying_, [this](bool playing) {
+            Element playBtn = skiff::Watch<bool>(
+                pnd::music::playing, [this](bool playing) {
                     return musicPlayButton(playing, [this] { music_.togglePlay(); });
                 });
 
             Element nextBtn = musicIconBtn(
                 ICON_NEXT, kHi, 52, [this] { music_.next(); });
 
-            Element repeatBtn = skiff::Watch(repeat_, [this](int mode) {
-                return musicIconBtn(ICON_LOOP, mode != 0 ? kMusic : kLo, 48,
-                                    [this] { music_.toggleRepeat(); });
-            });
+            Element repeatBtn = skiff::Watch<int>(
+                pnd::music::repeat, [this](int mode) {
+                    return musicIconBtn(ICON_LOOP, mode != 0 ? kMusic : kLo, 48,
+                                        [this] { music_.toggleRepeat(); });
+                });
 
             Element controls = skiff::HStack({
                 shuffleBtn,
@@ -444,7 +440,7 @@ private:
                 repeatBtn,
             }, 16).centered();
 
-            Element volumeRow = skiff::Watch(volume_, [this](int v) {
+            Element volumeRow = skiff::Watch<int>(pnd::music::volume, [this](int v) {
                 return skiff::HStack({
                     skiff::Text(ICON_VOLUME).font(16).fg(kLo),
                     skiff::Slider(v, 0, 100, [this](int n) { music_.setVolume(n); })
@@ -556,12 +552,8 @@ private:
     }
 
     components::PageView::Body physicsBody_() {
-        return [this](components::StateView& st) -> Element {
-            State<int>& frame = st.get<int>(pnd::phys::frame);
-            State<bool>& paused = st.get<bool>(pnd::phys::paused);
-            State<int>& shape = st.get<int>(pnd::phys::shape);
-
-            Element canvas = skiff::Watch(frame, [this](int) -> Element {
+        return [this](components::StateView&) -> Element {
+            Element canvas = skiff::Watch<int>(pnd::phys::frame, [this](int) -> Element {
                 return skiff::Canvas(kPhysCanvasW, kPhysCanvasH,
                                      [this](skiff::CanvasContext& c) {
                                          pnd::physics::paintScene(c, physics_);
@@ -576,12 +568,12 @@ private:
                     .ttf(kFont, 14)
                     .fg(kLo)
                     .widthPct(100),
-                skiff::Watch(paused, [this](bool p) -> Element {
+                skiff::Watch<bool>(pnd::phys::paused, [this](bool p) -> Element {
                     return physicsToolBtn(p ? SKIFF_TR(physics_resume)
                                             : SKIFF_TR(physics_pause),
                                           [this] { physics_.togglePaused(); });
                 }),
-                skiff::Watch(shape, [this](int s) -> Element {
+                skiff::Watch<int>(pnd::phys::shape, [this](int s) -> Element {
                     return physicsToolBtn(s == 0 ? SKIFF_TR(physics_drop_box)
                                                  : SKIFF_TR(physics_drop_ball),
                                           [this] {
@@ -684,7 +676,7 @@ private:
                 .bg(0x1A222B),
                 skiff::components::TabView({
                     {SKIFF_TR(settings_network), networkSubmenu()},
-                    {SKIFF_TR(settings_display), skiff::Watch(brightness, [this, &brightness](int v) {
+                    {SKIFF_TR(settings_display), skiff::Watch<int>(pnd::g::brightness, [this, &brightness](int v) {
                         return displaySubmenu(v, [this, &brightness](int n) {
                             brightness.set(n);
                             display_.setBrightness(n);
@@ -760,7 +752,7 @@ private:
             State<bool>& menuExpanded = states().get<bool>(pnd::g::menuExpanded);
             State<int>& brightness = states().get<int>(pnd::g::brightness);
             std::vector<Element> out;
-            out.push_back(skiff::Watch(menuExpanded, [this, &brightness](bool expanded) -> Element {
+            out.push_back(skiff::Watch<bool>(pnd::g::menuExpanded, [this, &brightness](bool expanded) -> Element {
                 if (!expanded) {
                     return skiff::VStack(std::vector<Element>(), 0)
                         .size(0, 0)
@@ -772,7 +764,7 @@ private:
                     })
                         .sizePct(100, 100)
                         .floating(),
-                    skiff::Watch(brightness, [this](int) -> Element {
+                    skiff::Watch<int>(pnd::g::brightness, [this](int) -> Element {
                         return topMenuOverlay(states().get<bool>(pnd::g::menuExpanded),
                                               states().get<int>(pnd::g::brightness),
                                               router(),
